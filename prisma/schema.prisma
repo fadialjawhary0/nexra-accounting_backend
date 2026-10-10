@@ -97,7 +97,7 @@ model User {
   passwordHash       String?
   passwordChangedAt  DateTime?
   /// Set for the seeded owner and after an administrator reset: the only thing the account may do is choose a new password.
-  mustChangePassword Boolean    @default(false)
+  mustChangePassword Boolean   @default(false)
 
   twoFactorEnabled  Boolean @default(false)
   /// TOTP secret, encrypted with CryptoService.
@@ -308,11 +308,14 @@ model StoredFile {
   storageKey    String    @unique
   /// What the upload is for: `office_logo`, `attachment` … (see src/module/files/files.constants.ts).
   purpose       String
-  /// Permission area that decides who may open it (`companies`, `employees` …); null = every signed-in person (office logo).
+  /// Permission area that decides who may open it (`clients`, `employees` …); null = every signed-in person (office logo).
   area          String?
   /// Optional link to a record: its type (`client`) and id.
   entityType    String?
   entityId      String?
+  /// The folder of the client's documents it sits in (null = not in a folder).
+  folderId      String?
+  folder        Folder?   @relation(fields: [folderId], references: [id], onDelete: SetNull)
   isActive      Boolean   @default(true)
   deactivatedAt DateTime?
   uploadedById  String?
@@ -320,6 +323,7 @@ model StoredFile {
 
   @@index([entityType, entityId])
   @@index([purpose])
+  @@index([folderId])
 }
 
 // ───────────────────────────── Form definitions (the form builder) ─────────────────────────────
@@ -352,4 +356,135 @@ model FormRevision {
   publishedById String?
 
   @@unique([entity, revision])
+}
+
+// ───────────────────────────── Clients ─────────────────────────────
+
+/// A client of the office. The columns are the fields the logic reads, sorts and joins on; every other field of the client form
+/// (Settings → Forms) lives in `data`, keyed by the field's stable key. Clients are never deleted — they are stopped.
+model Client {
+  id                 String    @id @default(cuid())
+  /// The number the office knows the client by ("042"); also the start of the folder name. Always upper-case.
+  number             String    @unique
+  name               String
+  /// Code of the `legal_form` list.
+  legalForm          String?
+  kvk                String?
+  vatNumber          String?
+  responsibleUserId  String?
+  /// false = stopped (the old `KLANTEN GESTOPT`). Everything stays for history and inspections.
+  isActive           Boolean   @default(true)
+  /// The day the client stopped.
+  stoppedOn          DateTime? @db.Date
+  deactivatedAt      DateTime?
+  deactivatedById    String?
+  deactivationReason String    @default("")
+  /// The other fields of the client form, by field key.
+  data               Json      @default("{}")
+  /// Accent-free lower-case text of the fields marked "search" plus the people's names (kept by ClientsService).
+  searchText         String    @default("")
+  createdById        String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  people        ClientPerson[]
+  relationsFrom ClientRelation[] @relation("RelationFrom")
+  relationsTo   ClientRelation[] @relation("RelationTo")
+  folders       Folder[]
+
+  @@index([isActive])
+  @@index([legalForm])
+  @@index([data], type: Gin)
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// An owner, director, partner or contact person of one or more clients. The columns are what lists and search need, the rest of
+/// the person form lives in `data` (sensitive values — BSN, document number — encrypted).
+model Person {
+  id                 String         @id @default(cuid())
+  firstName          String
+  lastName           String
+  data               Json           @default("{}")
+  searchText         String         @default("")
+  isActive           Boolean        @default(true)
+  deactivatedAt      DateTime?
+  deactivatedById    String?
+  deactivationReason String         @default("")
+  createdById        String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  clients            ClientPerson[]
+
+  @@index([lastName, firstName])
+}
+
+/// A person's role at a client (the same person can be owner of one company and director of another).
+model ClientPerson {
+  id        String    @id @default(cuid())
+  clientId  String
+  client    Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  personId  String
+  person    Person    @relation(fields: [personId], references: [id], onDelete: Restrict)
+  /// Code of the `person_role` list.
+  role      String
+  startedOn DateTime? @db.Date
+  /// Set when the role ended (a director who resigned) — the link stays for history.
+  endedOn   DateTime? @db.Date
+  createdAt DateTime  @default(now())
+
+  @@unique([clientId, personId, role])
+  @@index([personId])
+}
+
+/// How two clients belong together: a holding and its subsidiary, or companies of one group.
+model ClientRelation {
+  id        String   @id @default(cuid())
+  fromId    String
+  from      Client   @relation("RelationFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  toId      String
+  to        Client   @relation("RelationTo", fields: [toId], references: [id], onDelete: Cascade)
+  /// Code of the `client_relation_kind` list: `parent` = `from` is the holding (parent company) of `to`; `group` = same group (symmetric, stored once).
+  kind      String
+  createdAt DateTime @default(now())
+
+  @@unique([fromId, toId, kind])
+  @@index([toId])
+}
+
+// ───────────────────────────── Documents: folders ─────────────────────────────
+
+/// A folder in a client's documents. A client's root folder is `<number>- <name>`; the standard sub-folders come from the
+/// `client_folder` list (Settings → Lists). Folders are virtual — the bytes of a file sit in storage under their own key.
+model Folder {
+  id           String       @id @default(cuid())
+  clientId     String
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  parentId     String?
+  parent       Folder?      @relation("FolderTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children     Folder[]     @relation("FolderTree")
+  name         String
+  /// Code of the `client_folder` item it was made from; null for the root and for folders people added.
+  templateCode String?
+  sortOrder    Int          @default(0)
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  files        StoredFile[]
+
+  @@index([clientId, parentId])
+}
+
+// ───────────────────────────── Unique form values ─────────────────────────────
+
+/// One row per value of a form field that must be unique ("no two records may hold the same value" in the form builder). Written in
+/// the same transaction as the record. `value` is normalised (lower-case); for encrypted fields it is a keyed hash, never the value.
+model UniqueFieldValue {
+  id       String @id @default(cuid())
+  entity   String
+  fieldKey String
+  value    String
+  recordId String
+
+  @@unique([entity, fieldKey, value])
+  @@index([entity, recordId])
 }

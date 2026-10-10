@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, Res, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
@@ -12,6 +12,14 @@ class UploadFileDto {
   @IsOptional() @IsString() @MaxLength(40) area?: string;
   @IsOptional() @IsString() @MaxLength(40) entityType?: string;
   @IsOptional() @IsString() @MaxLength(60) entityId?: string;
+  /** The folder of the client's documents it goes into. */
+  @IsOptional() @IsString() @MaxLength(60) folderId?: string;
+}
+
+class UpdateFileDto {
+  @IsOptional() @IsString() @MaxLength(180) name?: string;
+  /** Another folder of the same client; `null` takes the file out of its folder. */
+  @IsOptional() @IsString() @MaxLength(60) folderId?: string | null;
 }
 
 class DownloadQuery {
@@ -39,6 +47,11 @@ export class FilesController {
   @Post()
   upload(@UploadedFile() file: Express.Multer.File | undefined, @Body() dto: UploadFileDto, @CurrentUser() user: AuthenticatedUser) {
     return this.files.upload(file, dto, user);
+  }
+
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() dto: UpdateFileDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.files.update(id, dto, user);
   }
 
   @Get(':id')

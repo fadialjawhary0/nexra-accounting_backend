@@ -90,3 +90,15 @@ export class UsersController {
     return this.users.remove(id, actor);
   }
 }
+
+/** The names behind "staff member" fields (the responsible person of a client …). Open to every signed-in person: names only. */
+@Controller('lookups/users')
+export class UsersLookupController {
+  constructor(private readonly users: UsersService) {}
+
+  /** `?include=<id>` adds that person even when switched off (a record keeps showing who it was assigned to). */
+  @Get()
+  list(@Query('include') include?: string) {
+    return this.users.lookup(include);
+  }
+}

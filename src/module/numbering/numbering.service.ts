@@ -35,7 +35,8 @@ export class NumberingService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
   ) {
-    this.register({ key: 'client', label: { nl: 'Klantnummer', en: 'Client number' } });
+    // Ahmad's client numbers are three digits wide (007, 042, 146); 290 clients so far.
+    this.register({ key: 'client', label: { nl: 'Klantnummer', en: 'Client number' }, defaults: { padding: 3 } });
   }
 
   register(definition: SequenceDefinition): void {
@@ -59,6 +60,17 @@ export class NumberingService implements OnModuleInit {
     return rows
       .filter(row => this.definitions.has(row.key))
       .map(row => ({ key: row.key, label: this.definitions.get(row.key)!.label, prefix: row.prefix, padding: row.padding, next: row.next, example: formatNumber(row, row.next) }));
+  }
+
+  /**
+   * A number somebody typed, the way it is stored: trimmed and upper-case, and a plain number written in the sequence's format
+   * (padding and prefix: "7" → "007"). Anything with letters or other characters is kept as typed.
+   */
+  async normalize(key: string, typed: string): Promise<string> {
+    const text = typed.trim().toUpperCase();
+    if (!/^\d{1,9}$/.test(text)) return text;
+    const row = await this.prisma.numberSequence.findUnique({ where: { key } });
+    return row ? formatNumber(row, Number(text)) : text;
   }
 
   /** What the next number would look like, without using it (the "suggested number" on a new record). */

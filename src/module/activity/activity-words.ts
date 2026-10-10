@@ -22,6 +22,10 @@ const ACTIONS: Record<string, Named> = {
   recovery_codes_created: { nl: 'Herstelcodes aangemaakt', en: 'Recovery codes created' },
   invite_resent: { nl: 'Uitnodiging opnieuw verstuurd', en: 'Invitation re-sent' },
   invite_accepted: { nl: 'Uitnodiging geaccepteerd', en: 'Invitation accepted' },
+  linked: { nl: 'Gekoppeld', en: 'Linked' },
+  unlinked: { nl: 'Losgekoppeld', en: 'Unlinked' },
+  ended: { nl: 'Beëindigd', en: 'Ended' },
+  revealed: { nl: 'Gevoelige gegevens bekeken', en: 'Sensitive data viewed' },
 };
 
 const ENTITIES: Record<string, Named> = {
@@ -35,6 +39,9 @@ const ENTITIES: Record<string, Named> = {
   holiday: { nl: 'Feestdag', en: 'Holiday' },
   file: { nl: 'Bestand', en: 'File' },
   form: { nl: 'Formulier', en: 'Form' },
+  client: { nl: 'Klant', en: 'Client' },
+  person: { nl: 'Persoon', en: 'Person' },
+  folder: { nl: 'Map', en: 'Folder' },
 };
 
 export const actionName = (code: string, locale: AppLocale): string => ACTIONS[code]?.[locale] ?? code;

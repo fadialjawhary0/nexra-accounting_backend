@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma/client.js';
 import { AuditService } from '../../lib/audit/audit.service.js';
 import { PrismaService } from '../../lib/database/prisma.service.js';
@@ -22,12 +22,20 @@ const describeEntity = (entity: string, config: FormEntity) => ({ entity, names:
  */
 @Injectable()
 export class FormsService {
+  private readonly logger = new Logger(FormsService.name);
   private readonly cache = new Map<string, { doc: FormDoc; revision: number; at: number }>();
+  /** Modules that keep derived data of a form's records (search text, unique values) register here to be told when the form changes. */
+  private readonly publishListeners = new Map<string, Array<() => Promise<void>>>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
   ) {}
+
+  /** Calls `listener` after the form of `entity` was published (its records may need reindexing). */
+  onPublish(entity: string, listener: () => Promise<void>): void {
+    this.publishListeners.set(entity, [...(this.publishListeners.get(entity) ?? []), listener]);
+  }
 
   /** The entity's configuration, or 404. */
   config(entity: string): FormEntity {
@@ -139,6 +147,9 @@ export class FormsService {
       entityLabel: config.names.en,
       meta: { revision, fields: doc.fields.length, note: note || undefined },
     });
+    for (const listener of this.publishListeners.get(entity) ?? []) {
+      await listener().catch((error: unknown) => this.logger.error(`Reindex after publishing the ${entity} form failed: ${String(error)}`));
+    }
     return this.builder(entity);
   }
 

@@ -31,6 +31,7 @@ import { SecuritySettingsModule } from './module/security-settings/security-sett
 import { SettingsFeatureModule } from './module/settings/settings.module.js';
 import { SecuritySettingsService } from './module/security-settings/security-settings.service.js';
 import { UsersModule } from './module/users/users.module.js';
+import { ClientsModule } from './module/clients/clients.module.js';
 
 @Module({
   imports: [
@@ -78,6 +79,7 @@ import { UsersModule } from './module/users/users.module.js';
     UsersModule,
     RolesModule,
     ActivityModule,
+    ClientsModule,
   ],
   providers: [
     { provide: APP_PIPE, useFactory: createValidationPipe },

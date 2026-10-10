@@ -36,9 +36,12 @@ export class FormValidationService {
       .filter((id): id is string => typeof id === 'string');
     const files = fileIds.length ? await this.prisma.storedFile.findMany({ where: { id: { in: fileIds }, isActive: true }, select: { id: true, name: true, size: true, mimeType: true } }) : [];
 
+    const users = fields.some(field => field.type === 'user') ? await this.prisma.user.findMany({ where: { status: 'active' }, select: { id: true } }) : [];
+
     return validateValues(form, patch, existing, {
       lists,
       files: new Map(files.map(file => [file.id, file])),
+      users: new Set(users.map(user => user.id)),
       canView: field => canViewField(field, matrix),
       canEdit: field => canEditField(field, matrix),
     });

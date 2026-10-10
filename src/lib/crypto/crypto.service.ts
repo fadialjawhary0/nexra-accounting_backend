@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { AppConfigService } from '../config/app-config.service.js';
 
 const VERSION = 'v1';
@@ -8,6 +8,7 @@ const VERSION = 'v1';
  * Small crypto helpers used by auth and the restricted-data columns:
  *   - encrypt / decrypt   AES-256-GCM with the ENCRYPTION_KEY (2FA secrets, BSN, IBAN)
  *   - sha256              fingerprints of tokens we store (refresh, reset, invite) — never the token itself
+ *   - blindIndex          keyed hash of a restricted value (BSN, IBAN …): equal values give equal hashes, so duplicates can be found without storing the value
  *   - randomToken         unguessable URL-safe tokens
  */
 @Injectable()
@@ -32,6 +33,12 @@ export class CryptoService {
 
   sha256(value: string): string {
     return createHash('sha256').update(value).digest('hex');
+  }
+
+  /** HMAC-SHA256 under a key derived from the encryption key (so a leaked hash cannot be brute-forced without it). */
+  blindIndex(value: string): string {
+    const key = createHmac('sha256', this.config.encryptionKey).update('nexra:blind-index:v1').digest();
+    return createHmac('sha256', key).update(value).digest('hex');
   }
 
   randomToken(bytes = 32): string {

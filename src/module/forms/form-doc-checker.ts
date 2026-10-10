@@ -7,6 +7,7 @@ import {
   SENSITIVE_VIEW,
   WIDTHS,
   conditionFields,
+  isEncryptedField,
   type Condition,
   type FieldChoice,
   type FieldDef,
@@ -30,7 +31,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(v
 const text = (value: unknown, max: number): string => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 
 /** Types that cannot hold "the same value as another record". */
-const NOT_UNIQUE: readonly FieldType[] = ['textarea', 'boolean', 'multiselect', 'file'];
+const NOT_UNIQUE: readonly FieldType[] = ['textarea', 'boolean', 'multiselect', 'file', 'user'];
 
 /**
  * Turns whatever the form builder sent into a clean document, and says what is wrong with it.
@@ -100,15 +101,24 @@ export function checkDoc(input: unknown, live: FormDoc | null, knownLists: Reado
 
     const flagsIn = isRecord(entry.flags) ? entry.flags : {};
     const flag = (name: keyof FieldFlags, fallback: boolean) => (typeof flagsIn[name] === 'boolean' ? (flagsIn[name] as boolean) : fallback);
-    const flags: FieldFlags = { list: flag('list', false), filter: flag('filter', false), export: flag('export', true), search: flag('search', false), unique: flag('unique', false) };
+    const flags: FieldFlags = {
+      list: flag('list', false),
+      filter: flag('filter', false),
+      export: flag('export', true),
+      search: flag('search', false),
+      unique: flag('unique', false),
+      complete: flag('complete', false),
+    };
     if (flags.unique && NOT_UNIQUE.includes(type)) flags.unique = false;
     if (flags.search && !['text', 'textarea', 'email', 'phone', 'postcode', 'kvk', 'vat', 'rsin', 'payrollTax', 'select'].includes(type)) flags.search = false;
 
     const sensitive = SENSITIVE_TYPES.includes(type);
     // A BSN field is always limited to people with access to sensitive data; any other field is limited when the builder says so.
     const limited = sensitive || entry.viewPermission === SENSITIVE_VIEW || entry.editPermission === SENSITIVE_EDIT;
-    if (sensitive) {
+    // Encrypted values cannot be listed, searched, filtered or exported.
+    if (isEncryptedField({ type, viewPermission: limited ? SENSITIVE_VIEW : null })) {
       flags.list = false;
+      flags.filter = false;
       flags.export = false;
       flags.search = false;
     }

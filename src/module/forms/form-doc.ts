@@ -11,7 +11,7 @@ export interface Named {
 }
 
 /** Field types. A format type (iban, bsn …) validates and normalises its value the way src/common/validation/formats.ts does. */
-export const FIELD_TYPES = ['text', 'textarea', 'number', 'money', 'date', 'boolean', 'select', 'multiselect', 'email', 'phone', 'url', 'postcode', 'iban', 'bsn', 'kvk', 'vat', 'rsin', 'payrollTax', 'file'] as const;
+export const FIELD_TYPES = ['text', 'textarea', 'number', 'money', 'date', 'boolean', 'select', 'multiselect', 'email', 'phone', 'url', 'postcode', 'iban', 'bsn', 'kvk', 'vat', 'rsin', 'payrollTax', 'file', 'user'] as const;
 export type FieldType = (typeof FIELD_TYPES)[number];
 
 /** Types whose value is checked against a Dutch format (and stored normalised). */
@@ -32,6 +32,9 @@ export const FORMAT_OF_TYPE: Partial<Record<FieldType, 'email' | 'phone' | 'url'
 export const SENSITIVE_TYPES: readonly FieldType[] = ['bsn'];
 export const SENSITIVE_VIEW = 'personal_data.view';
 export const SENSITIVE_EDIT = 'personal_data.edit';
+
+/** Types whose stored text can be encrypted at rest when the field is limited to sensitive data (dates and files stay readable: reminders need them). */
+const ENCRYPTABLE_TYPES: readonly FieldType[] = ['bsn', 'iban', 'text', 'textarea', 'phone', 'email', 'postcode'];
 
 export const OPERATORS = ['eq', 'ne', 'in', 'nin', 'filled', 'empty'] as const;
 export type Operator = (typeof OPERATORS)[number];
@@ -68,6 +71,8 @@ export interface FieldFlags {
   search: boolean;
   /** No two records may hold the same value. */
   unique: boolean;
+  /** Counts toward a "complete" record: a record where this is empty shows up in the data-quality view. */
+  complete: boolean;
 }
 
 export interface FieldDef {
@@ -117,6 +122,10 @@ export const emptyDoc = (): FormDoc => ({ version: 1, sections: [], fields: [] }
 
 export const KEY_PATTERN = /^[a-z][a-z0-9_]{1,39}$/;
 export const WIDTHS: readonly FieldWidth[] = ['full', 'half', 'third'];
+
+/** A field whose value is encrypted in the database: a BSN, and any other text field limited to people with access to sensitive data. */
+export const isEncryptedField = (field: Pick<FieldDef, 'type' | 'viewPermission'>): boolean =>
+  field.type === 'bsn' || (field.viewPermission === SENSITIVE_VIEW && ENCRYPTABLE_TYPES.includes(field.type));
 
 /** The value counts as "not filled in". */
 export const isEmptyValue = (value: unknown): boolean =>

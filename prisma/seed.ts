@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 import argon2 from 'argon2';
 import { PrismaClient } from '../src/generated/prisma/client.js';
+import type { FormDoc } from '../src/module/forms/form-doc.js';
 import { SEED_FORMS } from './seed-data/forms.js';
 import { SEED_LISTS } from './seed-data/lists.js';
 import { MEDEWERKER_PERMISSIONS, MEDEWERKER_ROLE_KEY, OWNER_ROLE_KEY, fullAccess } from '../src/module/roles/permission-catalog.js';
@@ -63,11 +64,31 @@ const seeders: Seeder[] = [
   {
     name: 'forms',
     run: async prisma => {
-      // Only creates the forms that do not exist yet: once the form builder has touched a form, the office owns it.
+      // A form that does not exist yet is created. One that does belongs to the office (the form builder renames, hides and adds
+      // fields): the seed never overwrites it, it only appends system fields a newer version of the system introduced.
       for (const [entity, doc] of Object.entries(SEED_FORMS)) {
-        if (await prisma.formDefinition.findUnique({ where: { entity } })) continue;
-        const json = JSON.parse(JSON.stringify(doc)) as object;
-        await prisma.formDefinition.create({ data: { entity, live: json, revision: 1, revisions: { create: { revision: 1, doc: json, note: 'First version' } } } });
+        const existing = await prisma.formDefinition.findUnique({ where: { entity } });
+        if (!existing) {
+          const json = JSON.parse(JSON.stringify(doc)) as object;
+          await prisma.formDefinition.create({ data: { entity, live: json, revision: 1, revisions: { create: { revision: 1, doc: json, note: 'First version' } } } });
+          continue;
+        }
+        const live = existing.live as unknown as FormDoc;
+        const added = doc.fields.filter(field => !live.fields.some(have => have.key === field.key));
+        if (!added.length) continue;
+        const draft = existing.draft as unknown as FormDoc | null;
+        const next = appendFields(live, doc, added);
+        const nextDraft = draft ? appendFields(draft, doc, added) : null;
+        const revision = existing.revision + 1;
+        const json = JSON.parse(JSON.stringify(next)) as object;
+        await prisma.$transaction([
+          prisma.formRevision.create({ data: { entity, revision, doc: json, note: `System update: added ${added.map(field => field.key).join(', ')}` } }),
+          prisma.formDefinition.update({
+            where: { entity },
+            data: { live: json, revision, publishedAt: new Date(), ...(nextDraft && { draft: JSON.parse(JSON.stringify(nextDraft)) as object }) },
+          }),
+        ]);
+        console.log(`  ${entity}: added ${added.map(field => field.key).join(', ')} (revision ${revision}).`);
       }
     },
   },
@@ -101,6 +122,22 @@ const seeders: Seeder[] = [
     },
   },
 ];
+
+/** Adds the given seed fields (and the sections they need) to a form document, at the end of their section. */
+function appendFields(target: FormDoc, seed: FormDoc, added: FormDoc['fields']): FormDoc {
+  const sections = [...target.sections];
+  const fields = [...target.fields];
+  for (const field of added) {
+    if (fields.some(have => have.key === field.key)) continue;
+    if (!sections.some(section => section.key === field.section)) {
+      const seedSection = seed.sections.find(section => section.key === field.section);
+      if (!seedSection) continue;
+      sections.push({ ...seedSection, order: sections.length });
+    }
+    fields.push({ ...field, order: fields.filter(have => have.section === field.section).length });
+  }
+  return { ...target, sections, fields };
+}
 
 async function main() {
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });

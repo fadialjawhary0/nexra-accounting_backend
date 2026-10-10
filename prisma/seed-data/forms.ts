@@ -23,7 +23,7 @@ interface FieldOptions {
   flags?: Partial<FieldFlags>;
 }
 
-const NO_FLAGS: FieldFlags = { list: false, filter: false, export: true, search: false, unique: false };
+const NO_FLAGS: FieldFlags = { list: false, filter: false, export: true, search: false, unique: false, complete: false };
 
 class FormBuilder {
   readonly doc: FormDoc = emptyDoc();
@@ -69,25 +69,26 @@ const WITH_OWNER: Condition = { field: 'legal_form', op: 'in', value: ['eenmansz
 export const CLIENT_FORM: FormDoc = new FormBuilder()
   .section('general', 'Algemeen', 'General')
   .field('number', 'text', 'Klantnummer', 'Client number', { required: true, locked: true, width: 'third', help: named('Het nummer waaronder je deze klant kent; ook voor de map en SnelStart.', 'The number you know this client by; also used for the folder and SnelStart.'), flags: { list: true, filter: true, search: true, unique: true } })
-  .field('name', 'text', 'Bedrijfsnaam', 'Company name', { required: true, locked: true, flags: { list: true, filter: true, search: true } })
+  .field('name', 'text', 'Bedrijfsnaam', 'Company name', { required: true, locked: true, flags: { list: true, filter: true, search: true, complete: true } })
   .field('trade_name', 'text', 'Handelsnaam', 'Trade name', { kind: 'custom', help: named('Alleen invullen als de handelsnaam afwijkt van de bedrijfsnaam.', 'Only if the trade name differs from the company name.'), flags: { search: true } })
-  .field('legal_form', 'select', 'Rechtsvorm', 'Legal form', { required: true, locked: true, list: 'legal_form', help: named('Bepaalt welke andere gegevens het formulier toont.', 'Decides which other details the form shows.'), flags: { list: true, filter: true } })
+  .field('legal_form', 'select', 'Rechtsvorm', 'Legal form', { required: true, locked: true, list: 'legal_form', help: named('Bepaalt welke andere gegevens het formulier toont.', 'Decides which other details the form shows.'), flags: { list: true, filter: true, complete: true } })
   .field('sector', 'select', 'Branche', 'Sector', { kind: 'custom', list: 'sector', flags: { filter: true } })
+  .field('responsible_user', 'user', 'Verantwoordelijke medewerker', 'Responsible staff member', { width: 'half', help: named('Wie op kantoor deze klant behandelt.', 'Who at the office handles this client.'), flags: { filter: true } })
   .field('contact_person', 'text', 'Contactpersoon', 'Contact person', { flags: { list: true, search: true } })
   .field('client_since', 'date', 'Klant sinds', 'Client since', { kind: 'custom' })
   .field('notes', 'textarea', 'Notities', 'Notes', { kind: 'custom', width: 'full' })
 
   .section('address', 'Adres', 'Address')
-  .field('street', 'text', 'Straatnaam', 'Street', { width: 'full' })
-  .field('house_number', 'text', 'Huisnummer', 'House number', { width: 'third' })
+  .field('street', 'text', 'Straatnaam', 'Street', { width: 'full', flags: { complete: true } })
+  .field('house_number', 'text', 'Huisnummer', 'House number', { width: 'third', flags: { complete: true } })
   .field('house_number_suffix', 'text', 'Toevoeging', 'Suffix', { width: 'third' })
-  .field('postal_code', 'postcode', 'Postcode', 'Postal code', { width: 'third', placeholder: named('1234 AB', '1234 AB') })
-  .field('city', 'text', 'Plaats', 'City', { flags: { list: true, filter: true } })
+  .field('postal_code', 'postcode', 'Postcode', 'Postal code', { width: 'third', placeholder: named('1234 AB', '1234 AB'), flags: { search: true, complete: true } })
+  .field('city', 'text', 'Plaats', 'City', { flags: { list: true, filter: true, search: true, complete: true } })
 
   .section('contact', 'Contact', 'Contact')
-  .field('phone_1', 'phone', 'Telefoon 1', 'Phone 1', { flags: { list: true } })
+  .field('phone_1', 'phone', 'Telefoon 1', 'Phone 1', { flags: { list: true, complete: true } })
   .field('phone_2', 'phone', 'Telefoon 2', 'Phone 2')
-  .field('email_1', 'email', 'E-mail 1', 'E-mail 1', { flags: { list: true, search: true } })
+  .field('email_1', 'email', 'E-mail 1', 'E-mail 1', { flags: { list: true, search: true, complete: true } })
   .field('email_2', 'email', 'E-mail 2', 'E-mail 2')
   .field('website', 'url', 'Website', 'Website', { kind: 'custom', width: 'full' })
 
@@ -98,8 +99,8 @@ export const CLIENT_FORM: FormDoc = new FormBuilder()
   .field('g_account_bank', 'select', 'Bank van de G-rekening', 'G-account bank', { kind: 'custom', list: 'bank' })
 
   .section('registration', 'Registratie en belastingen', 'Registration and taxes')
-  .field('kvk', 'kvk', 'KvK-nummer', 'Chamber of Commerce number', { flags: { filter: true, search: true, unique: true } })
-  .field('vat_number', 'vat', 'BTW-nummer', 'VAT number', { help: named('Het omzetbelastingnummer, zoals de Belastingdienst het gebruikt.', 'The turnover-tax number as the tax authority uses it.'), flags: { search: true } })
+  .field('kvk', 'kvk', 'KvK-nummer', 'Chamber of Commerce number', { flags: { list: true, filter: true, search: true, unique: true, complete: true } })
+  .field('vat_number', 'vat', 'BTW-nummer', 'VAT number', { help: named('Het omzetbelastingnummer, zoals de Belastingdienst het gebruikt.', 'The turnover-tax number as the tax authority uses it.'), flags: { search: true, complete: true } })
   .field('vat_id_number', 'vat', 'Btw-identificatienummer', 'VAT identification number', { help: named('Staat op facturen; bij een eenmanszaak verschilt het van het BTW-nummer.', 'Shown on invoices; for a sole proprietorship it differs from the VAT number.') })
   .field('rsin', 'rsin', 'RSIN', 'RSIN', { showWhen: { field: 'legal_form', op: 'nin', value: ['eenmanszaak'] }, help: named('Rechtspersonen- en Samenwerkingsverbanden Informatienummer (9 cijfers).', 'Legal-entity identification number (9 digits).') })
   .field('payroll_tax_number', 'payrollTax', 'Loonheffingennummer', 'Payroll tax number', { placeholder: named('123456789L01', '123456789L01') })
@@ -128,7 +129,7 @@ export const PERSON_FORM: FormDoc = new FormBuilder()
   .field('last_name', 'text', 'Achternaam', 'Last name', { required: true, locked: true, flags: { list: true, search: true } })
   .field('date_of_birth', 'date', 'Geboortedatum', 'Date of birth')
   .field('nationality', 'select', 'Nationaliteit', 'Nationality', { kind: 'custom', list: 'nationality' })
-  .field('bsn', 'bsn', 'BSN', 'Citizen service number (BSN)', { help: named('Alleen zichtbaar voor mensen met toegang tot gevoelige gegevens.', 'Only visible to people with access to sensitive data.') })
+  .field('bsn', 'bsn', 'BSN', 'Citizen service number (BSN)', { help: named('Alleen zichtbaar voor mensen met toegang tot gevoelige gegevens.', 'Only visible to people with access to sensitive data.'), flags: { unique: true } })
 
   .section('contact', 'Contact', 'Contact')
   .field('phone', 'phone', 'Telefoon', 'Phone', { flags: { list: true } })

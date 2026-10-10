@@ -23,10 +23,12 @@ const safeName = (value: string): string =>
 
 export interface UploadInput {
   purpose: string;
-  /** Attachments: the permission area the file belongs to (`companies`, `employees` …). */
+  /** Attachments: the permission area the file belongs to (`clients`, `employees` …). */
   area?: string;
   entityType?: string;
   entityId?: string;
+  /** The folder of the client's documents to put it in. */
+  folderId?: string;
 }
 
 /** What the API shows of a file. The bytes are fetched separately (`GET /files/:id/download`). */
@@ -39,6 +41,7 @@ export const serializeFile = (file: StoredFile) => ({
   area: file.area,
   entityType: file.entityType,
   entityId: file.entityId,
+  folderId: file.folderId,
   active: file.isActive,
   uploadedById: file.uploadedById,
   createdAt: file.createdAt.toISOString(),
@@ -84,6 +87,8 @@ export class FilesService {
       throw new UnsupportedMediaTypeException({ code: 'file_content_mismatch', message: 'The content of the file does not match its type.' });
     }
 
+    if (input.folderId) await this.assertFolder(input.folderId, input.entityType, input.entityId);
+
     const storageKey = `files/${randomUUID()}`;
     await this.storage.put(storageKey, file.buffer);
     const row = await this.prisma.storedFile.create({
@@ -97,6 +102,7 @@ export class FilesService {
         area,
         entityType: input.entityType ?? null,
         entityId: input.entityId ?? null,
+        folderId: input.folderId ?? null,
         uploadedById: user.id,
       },
     });
@@ -113,6 +119,28 @@ export class FilesService {
     const file = await this.readable(id, user);
     if (!(await this.storage.exists(file.storageKey))) throw new NotFoundException({ code: 'not_found', message: 'The file is no longer available.' });
     return { file, stream: await this.storage.get(file.storageKey) };
+  }
+
+  /** Renames a file (the extension stays) and / or moves it to another folder of the same client. */
+  async update(id: string, changes: { name?: string; folderId?: string | null }, user: AuthenticatedUser) {
+    const file = await this.prisma.storedFile.findUnique({ where: { id } });
+    if (!file || !file.isActive) throw new NotFoundException({ code: 'not_found', message: 'File not found' });
+    if (!file.area || !matrixAllows(user.matrix, `${file.area}.edit`)) this.forbidden();
+
+    const data: { name?: string; folderId?: string | null } = {};
+    if (changes.name !== undefined) {
+      const name = safeName(changes.name);
+      if (!name || extensionOf(name) !== extensionOf(file.name)) throw new UnprocessableEntityException({ code: 'validation_failed', message: 'Validation failed', fields: { name: 'validation.invalid' } });
+      data.name = name;
+    }
+    if (changes.folderId !== undefined) {
+      if (changes.folderId) await this.assertFolder(changes.folderId, file.entityType ?? undefined, file.entityId ?? undefined);
+      data.folderId = changes.folderId;
+    }
+    const updated = Object.keys(data).length ? await this.prisma.storedFile.update({ where: { id }, data }) : file;
+    const diff = AuditService.changes({ name: file.name, folderId: file.folderId }, { name: updated.name, folderId: updated.folderId });
+    if (Object.keys(diff.after).length) await this.audit.log({ action: 'updated', entityType: 'file', entityId: id, entityLabel: updated.name, before: diff.before, after: diff.after });
+    return serializeFile(updated);
   }
 
   async deactivate(id: string, user: AuthenticatedUser) {
@@ -142,6 +170,12 @@ export class FilesService {
   async link(ids: string[], entityType: string, entityId: string): Promise<void> {
     if (!ids.length) return;
     await this.prisma.storedFile.updateMany({ where: { id: { in: ids } }, data: { entityType, entityId } });
+  }
+
+  /** A folder is only for the files of its own client. */
+  private async assertFolder(folderId: string, entityType: string | undefined, entityId: string | undefined): Promise<void> {
+    const folder = entityType === 'client' && entityId ? await this.prisma.folder.findFirst({ where: { id: folderId, clientId: entityId, isActive: true }, select: { id: true } }) : null;
+    if (!folder) throw new UnprocessableEntityException({ code: 'validation_failed', message: 'Validation failed', fields: { folderId: 'validation.invalid' } });
   }
 
   private async readable(id: string, user: AuthenticatedUser): Promise<StoredFile> {

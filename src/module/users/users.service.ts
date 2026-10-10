@@ -17,7 +17,7 @@ import { TwoFactorService } from '../auth/two-factor.service.js';
 import { ListsService } from '../lists/lists.service.js';
 import { OWNER_ROLE_KEY, effectiveMatrix, escalations, sanitizeOverrides } from '../roles/permission-catalog.js';
 import type { InviteUserDto, UpdateUserDto, UserListQuery } from './dto/user.dto.js';
-import { EMPTY_WORKLOAD, serializeUser, type UserWithRole } from './user.serializer.js';
+import { EMPTY_WORKLOAD, serializeUser, type UserWithRole, type UserWorkload } from './user.serializer.js';
 
 const STATUSES: readonly string[] = ['active', 'invited', 'disabled'];
 const SORTABLE = ['name', 'email', 'role.name', 'status', 'lastActiveAt', 'createdAt'] as const;
@@ -57,14 +57,32 @@ export class UsersService {
       this.prisma.user.count({ where }),
       query.stats ? this.stats() : undefined,
     ]);
+    const workloads = await this.workloads(rows.map(row => row.id));
     return paged(
-      rows.map(row => serializeUser(row, EMPTY_WORKLOAD)),
+      rows.map(row => serializeUser(row, workloads.get(row.id) ?? EMPTY_WORKLOAD)),
       pageMeta(total, query, stats ? { stats } : {}),
     );
   }
 
   async get(id: string) {
-    return serializeUser(await this.findOrThrow(id), EMPTY_WORKLOAD);
+    const user = await this.findOrThrow(id);
+    return serializeUser(user, (await this.workloads([id])).get(id) ?? EMPTY_WORKLOAD);
+  }
+
+  /** The people who can be chosen in a "staff member" field: active users (and the one already chosen, even if switched off). */
+  async lookup(include?: string) {
+    const users = await this.prisma.user.findMany({
+      where: { OR: [{ status: 'active' }, ...(include ? [{ id: include }] : [])] },
+      select: { id: true, name: true, status: true },
+      orderBy: { name: 'asc' },
+    });
+    return users.map(user => ({ id: user.id, name: user.name, active: user.status === 'active' }));
+  }
+
+  /** What each person is responsible for: today the active clients they handle (the other counters arrive with their modules). */
+  private async workloads(ids: string[]): Promise<Map<string, UserWorkload>> {
+    const groups = ids.length ? await this.prisma.client.groupBy({ by: ['responsibleUserId'], where: { isActive: true, responsibleUserId: { in: ids } }, _count: { _all: true } }) : [];
+    return new Map(groups.flatMap(group => (group.responsibleUserId ? [[group.responsibleUserId, { ...EMPTY_WORKLOAD, clients: group._count._all, total: group._count._all }] as const] : [])));
   }
 
   /** The list (same filters, same sort, all pages) as a table for Excel / PDF / Word. */

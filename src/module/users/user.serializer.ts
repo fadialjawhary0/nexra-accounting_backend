@@ -3,14 +3,15 @@ import type { Role, User } from '../../generated/prisma/client.js';
 export type UserWithRole = User & { role: Role };
 
 export interface UserWorkload {
-  companies: number;
+  /** Active clients the person is responsible for. */
+  clients: number;
   openForms: number;
   openInspections: number;
   openTasks: number;
   total: number;
 }
 
-export const EMPTY_WORKLOAD: UserWorkload = { companies: 0, openForms: 0, openInspections: 0, openTasks: 0, total: 0 };
+export const EMPTY_WORKLOAD: UserWorkload = { clients: 0, openForms: 0, openInspections: 0, openTasks: 0, total: 0 };
 
 /** The user as the frontend knows it (no password hash, no 2FA secret). */
 export function serializeUser(user: UserWithRole, workload?: UserWorkload) {

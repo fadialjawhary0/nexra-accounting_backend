@@ -69,7 +69,8 @@ src/
    ├─ calendar/         Netherlands calendar: holidays, working-day arithmetic, deadlines
    ├─ files/            uploads (type / size checks), authorised download
    ├─ forms/            the admin-defined forms: definitions, drafts, revisions, value validation
-   └─ activity/         reads the audit trail, filter options, export   (clients, contracts … follow)
+   ├─ clients/          clients, their people and relations, folders / documents, data quality, export (Phase 6)
+   └─ activity/         reads the audit trail, filter options, export   (contracts … follow)
 ```
 
 ## Sign-in, users and roles (Phase 4)
@@ -113,8 +114,20 @@ src/
 - **Exports** — build an `ExportTable` (`{ title, subtitle, columns, rows, locale }`) and return `exports.download(response, table, format, user.name)`
   from a `GET …/export` route (see `users.controller.ts`, `activity.controller.ts`); check `exports.assertSize(rows.length)` first.
 
+## Clients (Phase 6)
+
+- `Client` keeps the fields the logic reads in columns (`number`, `name`, `legalForm`, `kvk`, `vatNumber`, `responsibleUserId`, status) and every other field of the
+  client form in `data` (`client-record.ts` maps field keys to columns). `Person` + `ClientPerson` (role, start / end), `ClientRelation`, `Folder`, `UniqueFieldValue`.
+- **Reading** — `GET /clients` builds its SQL in `forms/dynamic-query.ts` (search over `searchText`; `f.<field key>` filters for fields marked "filter"; `sort=<key>:dir`).
+  `FormRecordsService` (forms module) is what every record module shares: encrypting restricted values (`enc:` prefix, `isEncryptedField`), the "unique" switch
+  (`checkUnique` → 422 naming the holder, `claim` inside the saving transaction), the search text and audit snapshots without secrets.
+- **Saving** — validate with `FormValidationService.check`, split into columns / `data` (`splitValues`), encode, claim unique values and create the folders in one
+  transaction; every change writes an audit entry. A client is never deleted: `POST /clients/:id/status`.
+- **Numbers** — the `client` sequence is three digits wide; `NumberingService.normalize()` pads a typed number, `registerFloor()` keeps the suggestion above every number in use.
+- `npm run db:seed:dev` adds 28 synthetic demo clients (people, relations, folders) to a development database.
+
 New building blocks are created with the Nest CLI, always without spec files:
-`npx nest g module module/clients --flat`, `npx nest g service module/clients --flat --no-spec`, …
+`npx nest g module module/<name>`, `npx nest g service module/<name>/<name> --flat --no-spec`, …
 (imports keep their `.js` suffix — the project is ESM).
 
 ## Conventions

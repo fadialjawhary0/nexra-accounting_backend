@@ -14,12 +14,12 @@ export const FORM_ENTITIES: Record<string, FormEntity> = {
   client: {
     names: { nl: 'Klant', en: 'Client' },
     description: { nl: 'De gegevens van een klant: bedrijf, adres, bank, btw en alles wat Ahmad er zelf bij wil.', en: 'A client’s details: company, address, bank, VAT and anything else the office wants to record.' },
-    area: 'companies',
+    area: 'clients',
   },
   person: {
     names: { nl: 'Persoon', en: 'Person' },
     description: { nl: 'Eigenaren, bestuurders, vennoten en contactpersonen van een klant.', en: 'Owners, directors, partners and contact persons of a client.' },
-    area: 'companies',
+    area: 'clients',
   },
 };
 
