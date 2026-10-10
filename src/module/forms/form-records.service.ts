@@ -51,6 +51,11 @@ export class FormRecordsService {
     return plain;
   }
 
+  /** Stored → readable, without opening the encrypted values at all (lists never show them, so they are not worth decrypting). */
+  publicValues(stored: Record<string, unknown>): Record<string, unknown> {
+    return Object.fromEntries(Object.entries(stored).filter(([, value]) => !(typeof value === 'string' && value.startsWith(ENCRYPTED_PREFIX))));
+  }
+
   /** A cleaned patch → what is stored: the values of encrypted fields are encrypted, `null` (clear) stays `null`. */
   encode(doc: FormDoc, values: Record<string, unknown>): Record<string, unknown> {
     const encrypted = new Set(doc.fields.filter(isEncryptedField).map(field => field.key));

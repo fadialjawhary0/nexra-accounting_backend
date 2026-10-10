@@ -1,5 +1,5 @@
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { ListQueryDto } from '../../../common/dto/list-query.dto.js';
 
 /**
@@ -22,6 +22,8 @@ export class SetClientStatusDto {
   @IsOptional() @IsString() @MaxLength(500) reason?: string;
   /** The day the client stopped (`YYYY-MM-DD`), today when left out. */
   @IsOptional() @IsString() @MaxLength(10) date?: string;
+  /** Also stop the client's active workers (their last day is the day the client stopped). Needs the permission to stop workers. */
+  @IsOptional() @IsBoolean() stopWorkers?: boolean;
 }
 
 /** The grid's own query plus the columns to export. */
@@ -53,15 +55,6 @@ export class UpdatePersonLinkDto {
   @IsOptional() @IsString() @MaxLength(10) startedOn?: string | null;
   /** The day the role ended; `null` makes it current again. */
   @IsOptional() @IsString() @MaxLength(10) endedOn?: string | null;
-}
-
-export class SavePersonDto {
-  @IsObject() values!: Record<string, unknown>;
-}
-
-export class PersonLookupQuery {
-  @IsOptional() @IsString() @MaxLength(100) search?: string;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(500) limit: number = 15;
 }
 
 export class AddRelationDto {

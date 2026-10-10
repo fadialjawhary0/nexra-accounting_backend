@@ -38,10 +38,18 @@ export class FormValidationService {
 
     const users = fields.some(field => field.type === 'user') ? await this.prisma.user.findMany({ where: { status: 'active' }, select: { id: true } }) : [];
 
+    // A `client` field holds the id of a client: only the ones that were submitted are looked up.
+    const clientIds = fields
+      .filter(field => field.type === 'client')
+      .map(field => patch[field.key])
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+    const clients = clientIds.length ? await this.prisma.client.findMany({ where: { id: { in: clientIds } }, select: { id: true } }) : [];
+
     return validateValues(form, patch, existing, {
       lists,
       files: new Map(files.map(file => [file.id, file])),
       users: new Set(users.map(user => user.id)),
+      clients: new Set(clients.map(client => client.id)),
       canView: field => canViewField(field, matrix),
       canEdit: field => canEditField(field, matrix),
     });

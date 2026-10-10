@@ -31,7 +31,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(v
 const text = (value: unknown, max: number): string => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 
 /** Types that cannot hold "the same value as another record". */
-const NOT_UNIQUE: readonly FieldType[] = ['textarea', 'boolean', 'multiselect', 'file', 'user'];
+const NOT_UNIQUE: readonly FieldType[] = ['textarea', 'boolean', 'multiselect', 'file', 'user', 'client'];
 
 /**
  * Turns whatever the form builder sent into a clean document, and says what is wrong with it.

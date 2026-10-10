@@ -14,14 +14,22 @@ export interface QueryContext {
   /** Fields that live in a real column of the table instead of `data`: `field key → column name`. Written in code, never from a request. */
   columns: Readonly<Record<string, string>>;
   locale: 'nl' | 'en';
+  /** Fields whose value is computed by SQL instead of stored (a worker's current hourly rate): `field key → expression returning text`. Written in code. */
+  expressions?: Readonly<Record<string, Prisma.Sql>>;
+  /** Names of the columns that are real `DATE` columns: they are read as `YYYY-MM-DD` text like the dates inside `data`. */
+  dateColumns?: ReadonlySet<string>;
 }
 
 const dataRef = (context: QueryContext): Prisma.Sql => Prisma.raw(`${context.alias}."data"`);
 
 /** The field's stored value as text (`NULL` when empty). */
 export function valueExpr(context: QueryContext, key: string): Prisma.Sql {
+  const computed = context.expressions?.[key];
+  if (computed) return computed;
   const column = context.columns[key];
-  return column ? Prisma.raw(`${context.alias}."${column}"`) : Prisma.sql`${dataRef(context)} ->> ${key}`;
+  if (!column) return Prisma.sql`${dataRef(context)} ->> ${key}`;
+  const reference = Prisma.raw(`${context.alias}."${column}"`);
+  return context.dateColumns?.has(column) ? Prisma.sql`to_char(${reference}, 'YYYY-MM-DD')` : reference;
 }
 
 /** `a OR b OR c` in brackets. */
@@ -40,6 +48,7 @@ export function fieldFilter(context: QueryContext, field: FieldDef, raw: string)
   switch (field.type) {
     case 'select':
     case 'user':
+    case 'client':
       return Prisma.sql`${expr} IN (${Prisma.join(parts)})`;
     case 'multiselect':
       return Prisma.sql`jsonb_exists_any(${dataRef(context)} -> ${field.key}, ARRAY[${Prisma.join(parts)}]::text[])`;
@@ -85,6 +94,20 @@ export function searchCondition(context: QueryContext, search: string | undefine
   );
 }
 
+/** Like `searchCondition`, but every word may be found in the search text of any of several joined tables (`a."searchText" || b."searchText"`). */
+export function searchAcross(aliases: readonly string[], search: string | undefined): Prisma.Sql | null {
+  const words = fold(search ?? '')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 6);
+  if (!words.length) return null;
+  const text = Prisma.raw(aliases.map(alias => `${alias}."searchText"`).join(` || ' ' || `));
+  return Prisma.join(
+    words.map(word => Prisma.sql`(${text}) LIKE ${`%${escapeLike(word)}%`}`),
+    ' AND ',
+  );
+}
+
 export interface OrderPlan {
   /** A JOIN the ORDER BY needs (empty when none). */
   join: Prisma.Sql;
@@ -112,6 +135,8 @@ export function fieldOrder(context: QueryContext, field: FieldDef, dir: 'asc' | 
     }
     case 'user':
       return { join: Prisma.sql`LEFT JOIN "User" su ON su."id" = ${expr}`, order: Prisma.sql`lower(unaccent(su."name")) ${direction(dir)} NULLS LAST` };
+    case 'client':
+      return { join: Prisma.sql`LEFT JOIN "Client" sc ON sc."id" = ${expr}`, order: Prisma.sql`lpad(sc."number", 12, '0') ${direction(dir)} NULLS LAST` };
     case 'number':
     case 'money':
       return { join: empty, order: Prisma.sql`(${expr})::numeric ${direction(dir)} NULLS LAST` };

@@ -1,6 +1,8 @@
 /** Metadata keys read by the guards. */
 export const IS_PUBLIC_KEY = 'nexra:isPublic';
 export const PERMISSIONS_KEY = 'nexra:permissions';
+/** Routes that need at least ONE of several permissions (a record two areas share, such as a person who is an owner and a worker). */
+export const ANY_PERMISSIONS_KEY = 'nexra:anyPermissions';
 /** Routes that stay reachable while the account is restricted (must choose a new password / must set up two-step verification). */
 export const ALLOW_RESTRICTED_KEY = 'nexra:allowRestricted';
 /** Routes that get the strict sign-in rate limit. */

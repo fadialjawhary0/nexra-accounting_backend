@@ -58,7 +58,8 @@ export class FormsService {
   /** The published form as this person gets it to fill in (fields they may not see left out). Needs `view` on the entity's area. */
   async liveFor(entity: string, user: AuthenticatedUser) {
     const config = this.config(entity);
-    if (!matrixAllows(user.matrix, `${config.area}.view`)) throw new ForbiddenException({ code: 'forbidden', message: 'You do not have access to this.' });
+    const allowed = [config.area, ...(config.alsoViewableBy ?? [])].some(area => matrixAllows(user.matrix, `${area}.view`));
+    if (!allowed) throw new ForbiddenException({ code: 'forbidden', message: 'You do not have access to this.' });
     const { doc, revision } = await this.live(entity);
     return { entity, revision, area: config.area, doc: docFor(doc, user.matrix) };
   }

@@ -391,6 +391,7 @@ model Client {
   relationsFrom ClientRelation[] @relation("RelationFrom")
   relationsTo   ClientRelation[] @relation("RelationTo")
   folders       Folder[]
+  employees     Employee[]
 
   @@index([isActive])
   @@index([legalForm])
@@ -414,6 +415,7 @@ model Person {
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
   clients            ClientPerson[]
+  employments        Employee[]
 
   @@index([lastName, firstName])
 }
@@ -467,6 +469,9 @@ model Folder {
   templateCode String?
   sortOrder    Int          @default(0)
   isActive     Boolean      @default(true)
+  /// The worker whose folder this is (a folder inside the client's contracts folder, named after the worker).
+  employeeId   String?      @unique
+  employee     Employee?    @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   files        StoredFile[]
@@ -487,4 +492,56 @@ model UniqueFieldValue {
 
   @@unique([entity, fieldKey, value])
   @@index([entity, recordId])
+}
+
+// ───────────────────────────── Employees (workers) ─────────────────────────────
+
+/// A worker of a client: one person employed by one client. The human (name, BSN, address, ID document …) is a `Person`, so the same
+/// person at two clients — or an owner who also works in the company — is one record with two links. The columns are what the logic reads,
+/// sorts and joins on; every other field of the employee form (Settings → Forms) lives in `data`. Workers are never deleted: they are stopped.
+model Employee {
+  id                 String    @id @default(cuid())
+  personId           String
+  person             Person    @relation(fields: [personId], references: [id], onDelete: Restrict)
+  clientId           String
+  client             Client    @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  /// Code of the `employee_function` list.
+  functionCode       String?
+  startDate          DateTime? @db.Date
+  /// The day the worker left (or leaves). Set by stopping the worker; can also be filled in ahead of time.
+  endDate            DateTime? @db.Date
+  isActive           Boolean   @default(true)
+  deactivatedAt      DateTime?
+  deactivatedById    String?
+  deactivationReason String    @default("")
+  data               Json      @default("{}")
+  /// Accent-free lower-case text of the employee fields marked "search" (the person's and the client's text are searched through their own rows).
+  searchText         String    @default("")
+  createdById        String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  rates  RateHistory[]
+  folder Folder?
+
+  @@index([clientId, isActive])
+  @@index([personId])
+  @@index([isActive])
+  @@index([data], type: Gin)
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// The hourly rate of a worker over time. The rate that applies today is the latest row that starts on or before today; a change adds a row,
+/// it never overwrites the past (hours, salary statements and invoices keep pointing at what was true on their day).
+model RateHistory {
+  id          String   @id @default(cuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  rate        Decimal  @db.Decimal(10, 2)
+  validFrom   DateTime @db.Date
+  note        String   @default("")
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@unique([employeeId, validFrom])
 }

@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query
 import type { Request, Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { Locale, type AppLocale } from '../../common/decorators/locale.decorator.js';
-import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
+import { RequireAnyPermission, RequirePermission } from '../../common/decorators/require-permission.decorator.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.js';
 import { ExportsService } from '../../lib/exports/exports.service.js';
 import { readFieldFilters } from '../forms/dynamic-query.js';
@@ -72,7 +72,8 @@ export class ClientsController {
     return this.clients.nextNumber();
   }
 
-  /** Pickers: `?search=` best matches, `?ids=a,b` the ones already chosen. */
+  /** Pickers: `?search=` best matches, `?ids=a,b` the ones already chosen. Whoever works with workers needs it too (the client of a worker). */
+  @RequireAnyPermission('clients.view', 'employees.view')
   @Get('lookup')
   lookup(@Query() query: ClientLookupQuery) {
     return this.clients.lookup(query);
@@ -163,9 +164,9 @@ export class ClientsController {
 
   /** The client's folders and files (upload with `POST /files`: `purpose=attachment`, `area=clients`, `entityType=client`, `entityId`, `folderId`). */
   @Get(':id/documents')
-  async documents(@Param('id') id: string) {
+  async documents(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     await this.clients.findOrThrow(id);
-    return this.folders.documents(id);
+    return this.folders.documents(id, user.matrix);
   }
 
   @RequirePermission('clients.edit')

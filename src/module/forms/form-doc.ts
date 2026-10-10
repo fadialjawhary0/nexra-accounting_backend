@@ -11,7 +11,7 @@ export interface Named {
 }
 
 /** Field types. A format type (iban, bsn …) validates and normalises its value the way src/common/validation/formats.ts does. */
-export const FIELD_TYPES = ['text', 'textarea', 'number', 'money', 'date', 'boolean', 'select', 'multiselect', 'email', 'phone', 'url', 'postcode', 'iban', 'bsn', 'kvk', 'vat', 'rsin', 'payrollTax', 'file', 'user'] as const;
+export const FIELD_TYPES = ['text', 'textarea', 'number', 'money', 'date', 'boolean', 'select', 'multiselect', 'email', 'phone', 'url', 'postcode', 'iban', 'bsn', 'kvk', 'vat', 'rsin', 'payrollTax', 'file', 'user', 'client'] as const;
 export type FieldType = (typeof FIELD_TYPES)[number];
 
 /** Types whose value is checked against a Dutch format (and stored normalised). */

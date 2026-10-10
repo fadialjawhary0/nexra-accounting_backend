@@ -57,7 +57,8 @@ class FormBuilder {
       showWhen: options.showWhen ?? null,
       viewPermission: options.sensitive || type === 'bsn' ? 'personal_data.view' : null,
       editPermission: options.sensitive || type === 'bsn' ? 'personal_data.edit' : null,
-      flags: { ...NO_FLAGS, ...options.flags },
+      // Restricted values are never in an export unless the form builder switches that on for somebody who may see them.
+      flags: { ...NO_FLAGS, ...(options.sensitive || type === 'bsn' ? { export: false } : {}), ...options.flags },
     });
     return this;
   }
@@ -120,6 +121,14 @@ const PERSON_ID_TYPES: Array<[string, string, string]> = [
   ['driving_licence', 'Rijbewijs', 'Driving licence'],
 ];
 
+const PERMIT_TYPES: Array<[string, string, string]> = [
+  ['residence_permit', 'Verblijfsvergunning', 'Residence permit'],
+  ['work_permit', 'Tewerkstellingsvergunning', 'Work permit'],
+  ['single_permit', 'Gecombineerde vergunning (GVVA)', 'Single permit (GVVA)'],
+  ['eu_registration', 'EU-registratie', 'EU registration'],
+  ['none', 'Geen vergunning nodig', 'No permit needed'],
+];
+
 export const PERSON_FORM: FormDoc = new FormBuilder()
   .section('person', 'Persoon', 'Person')
   .field('salutation', 'select', 'Aanhef', 'Salutation', { list: 'salutation', width: 'third' })
@@ -128,24 +137,44 @@ export const PERSON_FORM: FormDoc = new FormBuilder()
   .field('infix', 'text', 'Tussenvoegsel', 'Name prefix', { width: 'third', help: named('Bijvoorbeeld “van”, “de”, “van der”.', 'For example “van”, “de”, “van der”.') })
   .field('last_name', 'text', 'Achternaam', 'Last name', { required: true, locked: true, flags: { list: true, search: true } })
   .field('date_of_birth', 'date', 'Geboortedatum', 'Date of birth')
-  .field('nationality', 'select', 'Nationaliteit', 'Nationality', { kind: 'custom', list: 'nationality' })
+  .field('nationality', 'select', 'Nationaliteit', 'Nationality', { kind: 'custom', list: 'nationality', flags: { filter: true } })
   .field('bsn', 'bsn', 'BSN', 'Citizen service number (BSN)', { help: named('Alleen zichtbaar voor mensen met toegang tot gevoelige gegevens.', 'Only visible to people with access to sensitive data.'), flags: { unique: true } })
 
   .section('contact', 'Contact', 'Contact')
-  .field('phone', 'phone', 'Telefoon', 'Phone', { flags: { list: true } })
-  .field('email', 'email', 'E-mail', 'E-mail', { flags: { list: true, search: true } })
+  .field('phone', 'phone', 'Telefoon', 'Phone')
+  .field('email', 'email', 'E-mail', 'E-mail', { flags: { search: true } })
+  .field('mobile', 'phone', 'Mobiel nummer', 'Mobile number', { help: named('Voor WhatsApp, in internationaal formaat (+31 6 …).', 'For WhatsApp, in international format (+31 6 …).'), flags: { list: true } })
 
   .section('address', 'Adres', 'Address')
   .field('street', 'text', 'Straatnaam', 'Street', { width: 'full' })
   .field('house_number', 'text', 'Huisnummer', 'House number', { width: 'third' })
   .field('house_number_suffix', 'text', 'Toevoeging', 'Suffix', { width: 'third' })
   .field('postal_code', 'postcode', 'Postcode', 'Postal code', { width: 'third' })
-  .field('city', 'text', 'Plaats', 'City')
+  .field('city', 'text', 'Plaats', 'City', { flags: { list: true, filter: true, search: true } })
+
+  .section('bank', 'Bank', 'Bank')
+  .field('iban', 'iban', 'IBAN', 'IBAN', { sensitive: true, help: named('Alleen zichtbaar voor mensen met toegang tot gevoelige gegevens.', 'Only visible to people with access to sensitive data.') })
 
   .section('id_document', 'Identiteitsbewijs', 'Identity document')
   .field('id_type', 'select', 'Soort document', 'Type of document', { kind: 'custom', choices: PERSON_ID_TYPES, sensitive: true })
   .field('id_number', 'text', 'Documentnummer', 'Document number', { kind: 'custom', sensitive: true })
   .field('id_expiry', 'date', 'Geldig tot', 'Valid until', { kind: 'custom', sensitive: true, help: named('Hiermee waarschuwt het systeem als een document bijna verloopt.', 'The system warns when a document is about to expire.') })
-  .field('id_file', 'file', 'Kopie van het document', 'Copy of the document', { kind: 'custom', sensitive: true, width: 'full' }).doc;
+  .field('id_file', 'file', 'Kopie van het document', 'Copy of the document', { kind: 'custom', sensitive: true, width: 'full' })
+  .field('permit_type', 'select', 'Verblijfs- of werkvergunning', 'Residence or work permit', { kind: 'custom', choices: PERMIT_TYPES, sensitive: true })
+  .field('permit_number', 'text', 'Nummer van de vergunning', 'Permit number', { kind: 'custom', sensitive: true })
+  .field('permit_expiry', 'date', 'Vergunning geldig tot', 'Permit valid until', { kind: 'custom', sensitive: true, help: named('Hiermee waarschuwt het systeem als een vergunning bijna verloopt.', 'The system warns when a permit is about to expire.') }).doc;
 
-export const SEED_FORMS: Record<string, FormDoc> = { client: CLIENT_FORM, person: PERSON_FORM };
+/**
+ * The employment of a worker at a client (the person — name, BSN, address, ID document — is the person form). The fields the logic needs
+ * are system fields: the client, the function, the days in and out of service, the hourly rate.
+ */
+export const EMPLOYEE_FORM: FormDoc = new FormBuilder()
+  .section('employment', 'Dienstverband', 'Employment')
+  .field('client', 'client', 'Klant (werkgever)', 'Client (employer)', { required: true, locked: true, width: 'full', help: named('De klant bij wie deze persoon werkt.', 'The client this person works for.'), flags: { filter: true, complete: true } })
+  .field('function', 'select', 'Functie', 'Function', { list: 'employee_function', flags: { list: true, filter: true, search: true, complete: true } })
+  .field('start_date', 'date', 'In dienst vanaf', 'In service since', { help: named('De eerste werkdag.', 'The first working day.'), flags: { list: true, complete: true } })
+  .field('end_date', 'date', 'Uit dienst per', 'Left service on', { help: named('Wordt ingevuld als je de werknemer stopzet; je kunt de datum ook vooraf invullen.', 'Filled in when you mark the employee as left; you can also fill it in ahead of time.') })
+  .field('hourly_rate', 'money', 'Uurloon (bruto)', 'Hourly rate (gross)', { help: named('Het uurloon van vandaag. Een wijziging wordt in de uurloongeschiedenis bewaard.', 'Today’s hourly rate. A change is kept in the rate history.'), flags: { list: true } })
+  .field('notes', 'textarea', 'Notities', 'Notes', { kind: 'custom', width: 'full' }).doc;
+
+export const SEED_FORMS: Record<string, FormDoc> = { client: CLIENT_FORM, person: PERSON_FORM, employee: EMPLOYEE_FORM };

@@ -172,9 +172,15 @@ export class FilesService {
     await this.prisma.storedFile.updateMany({ where: { id: { in: ids } }, data: { entityType, entityId } });
   }
 
-  /** A folder is only for the files of its own client. */
+  /** A folder is only for the files of its own client — or, for a worker's folder, of that worker. */
   private async assertFolder(folderId: string, entityType: string | undefined, entityId: string | undefined): Promise<void> {
-    const folder = entityType === 'client' && entityId ? await this.prisma.folder.findFirst({ where: { id: folderId, clientId: entityId, isActive: true }, select: { id: true } }) : null;
+    const where =
+      entityType === 'client' && entityId
+        ? { id: folderId, clientId: entityId, employeeId: null, isActive: true }
+        : entityType === 'employee' && entityId
+          ? { id: folderId, employeeId: entityId, isActive: true }
+          : null;
+    const folder = where ? await this.prisma.folder.findFirst({ where, select: { id: true } }) : null;
     if (!folder) throw new UnprocessableEntityException({ code: 'validation_failed', message: 'Validation failed', fields: { folderId: 'validation.invalid' } });
   }
 

@@ -11,6 +11,7 @@ import { PrismaService } from '../../lib/database/prisma.service.js';
 import { MAX_EXPORT_ROWS, type ExportColumn, type ExportFormat, type ExportTable } from '../../lib/exports/export.types.js';
 import { FilesService } from '../files/files.service.js';
 import { canViewField, valuesFor } from '../forms/field-access.js';
+import { exportType, exportValue, exportWidth } from '../forms/field-export.js';
 import { fieldFilter, fieldOrder, parseSort, searchCondition, type QueryContext } from '../forms/dynamic-query.js';
 import { isEmptyValue, isEncryptedField, type FieldDef, type FormDoc } from '../forms/form-doc.js';
 import { FormRecordsService } from '../forms/form-records.service.js';
@@ -18,7 +19,9 @@ import { FormValidationService } from '../forms/form-validation.service.js';
 import { FormsService } from '../forms/forms.service.js';
 import { ListsService } from '../lists/lists.service.js';
 import { NumberingService } from '../numbering/numbering.service.js';
-import type { PermissionMatrix } from '../roles/permission-catalog.js';
+import { EmployeesService } from '../employees/employees.service.js';
+import { PeopleService } from '../people/people.service.js';
+import { matrixAllows, type PermissionMatrix } from '../roles/permission-catalog.js';
 import { ClientFoldersService } from './client-folders.service.js';
 import { ClientQualityService } from './client-quality.service.js';
 import { CLIENT_COLUMNS, CLIENT_ENTITY, NUMBER_PATTERN, columnValues, day, displayLabel, personName, splitValues } from './client-record.js';
@@ -60,12 +63,19 @@ export class ClientsService implements OnModuleInit {
     private readonly files: FilesService,
     private readonly folders: ClientFoldersService,
     private readonly quality: ClientQualityService,
+    private readonly people: PeopleService,
+    private readonly employees: EmployeesService,
   ) {}
 
   onModuleInit(): void {
     this.numbering.registerFloor(CLIENT_ENTITY, () => this.highestNumber());
     // Changing the form (a field becomes searchable, unique …) means the derived data has to be rebuilt.
     this.forms.onPublish(CLIENT_ENTITY, () => this.reindex());
+    // A person's name is part of the search text of every client they belong to.
+    this.people.onChanged(async personId => {
+      const links = await this.prisma.clientPerson.findMany({ where: { personId }, select: { clientId: true } });
+      for (const link of links) await this.refreshSearch(link.clientId);
+    });
   }
 
   /* ── Reading ──────────────────────────────────────────────────────────────────────────────────────────────────── */
@@ -112,9 +122,13 @@ export class ClientsService implements OnModuleInit {
     const secret = [...this.records.encryptedKeys(doc)].filter(key => !isEmptyValue(values[key]));
     // Restricted values (the form builder's "sensitive" switch) reach the screen decrypted: each time that happens it is logged.
     if (audit && secret.length) await this.audit.log({ action: 'revealed', entityType: 'client', entityId: row.id, entityLabel: displayLabel(row), meta: { fields: secret } });
-    const [people, relations, documents, userNames] = await Promise.all([
+    // Only people who may open workers are told how many there are.
+    const mayOpenWorkers = matrixAllows(user.matrix, 'employees.view');
+    const [people, relations, employees, activeEmployees, documents, userNames] = await Promise.all([
       this.prisma.clientPerson.count({ where: { clientId: id } }),
       this.prisma.clientRelation.count({ where: { OR: [{ fromId: id }, { toId: id }] } }),
+      mayOpenWorkers ? this.prisma.employee.count({ where: { clientId: id } }) : Promise.resolve(null),
+      mayOpenWorkers ? this.prisma.employee.count({ where: { clientId: id, isActive: true } }) : Promise.resolve(null),
       this.folders.countFiles(id),
       this.userNames(row.responsibleUserId ? [row.responsibleUserId] : []),
     ]);
@@ -128,7 +142,7 @@ export class ClientsService implements OnModuleInit {
       deactivatedAt: row.deactivatedAt?.toISOString() ?? null,
       responsibleUser: row.responsibleUserId ? { id: row.responsibleUserId, name: userNames.get(row.responsibleUserId) ?? '' } : null,
       values,
-      counts: { people, relations, documents },
+      counts: { people, relations, employees, activeEmployees, documents },
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
@@ -269,6 +283,8 @@ export class ClientsService implements OnModuleInit {
       entityLabel: displayLabel(updated),
       meta: stopping ? { stoppedOn, ...(reason && { reason }) } : { previousStoppedOn: day(row.stoppedOn), ...(row.deactivationReason && { previousReason: row.deactivationReason }) },
     });
+    // The client's workers leave with it, when the person stopping the client asked for that (and may stop workers).
+    if (stopping && dto.stopWorkers && matrixAllows(user.matrix, 'employees.delete')) await this.employees.stopAllOf(id, stoppedOn!, reason, user);
     return this.get(id, user, { audit: false });
   }
 
@@ -495,42 +511,3 @@ export class ClientsService implements OnModuleInit {
     return parts.join(' · ');
   }
 }
-
-const exportType = (field: FieldDef): ExportColumn['type'] => {
-  switch (field.type) {
-    case 'number':
-      return 'number';
-    case 'money':
-      return 'money';
-    case 'date':
-      return 'date';
-    case 'boolean':
-      return 'boolean';
-    default:
-      return 'text';
-  }
-};
-
-const exportWidth = (field: FieldDef): number => (field.type === 'textarea' ? 40 : field.type === 'boolean' || field.type === 'date' ? 12 : field.type === 'select' || field.type === 'multiselect' ? 18 : 22);
-
-/** The name of a choice in the field's pick-list (or its own choices); the code itself when it is not known any more. */
-const choiceName = (field: FieldDef, code: string, names: Map<string, Map<string, string>>, locale: AppLocale): string =>
-  field.list ? (names.get(field.list)?.get(code) ?? code) : (field.choices.find(choice => choice.code === code)?.names[locale] ?? code);
-
-/** One cell of the export: pick-list codes become names, people become their names, files their file name. */
-function exportValue(field: FieldDef, value: unknown, names: Map<string, Map<string, string>>, userNames: Map<string, string>, locale: AppLocale): unknown {
-  if (isEmptyValue(value)) return null;
-  switch (field.type) {
-    case 'select':
-      return typeof value === 'string' ? choiceName(field, value, names, locale) : value;
-    case 'multiselect':
-      return Array.isArray(value) ? value.map(code => (typeof code === 'string' ? choiceName(field, code, names, locale) : code)).join(', ') : value;
-    case 'user':
-      return typeof value === 'string' ? (userNames.get(value) ?? '') : value;
-    case 'file':
-      return (value as { name?: string }).name ?? null;
-    default:
-      return value;
-  }
-}
-

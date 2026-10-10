@@ -63,6 +63,50 @@ const ROLE_FOR_FORM: Record<string, string> = { eenmanszaak: 'owner', vof: 'part
 const slug = (value: string) => fold(value).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 const digits = (seed: number, length: number) => String((seed * 7_919_443 + 1_234_567) % 10 ** length).padStart(length, '0');
 
+const WORKER_FIRST_NAMES = ['Aylin', 'Bram', 'Chantal', 'Dennis', 'Elif', 'Femke', 'Giovanni', 'Hanna', 'Ibrahim', 'Jasper', 'Katarzyna', 'Lars', 'Mirela', 'Nadia', 'Omar', 'Piotr', 'Quinten', 'Roxanne', 'Stefan', 'Tamara', 'Umut', 'Vera', 'Wouter', 'Xander', 'Yasmin', 'Zoltan'];
+const WORKER_LAST_NAMES: Array<[infix: string, last: string]> = [
+  ['', 'Kowalski'],
+  ['van', 'Rijn'],
+  ['', 'Demir'],
+  ['de', 'Haan'],
+  ['', 'Nowak'],
+  ['el', 'Idrissi'],
+  ['', 'Popescu'],
+  ['van den', 'Berg'],
+  ['', 'Yildiz'],
+  ['', 'Bos'],
+  ['', 'Horvat'],
+  ['de', 'Boer'],
+  ['', 'Alves'],
+  ['ter', 'Horst'],
+  ['', 'Kaya'],
+  ['', 'Wójcik'],
+];
+/** First names above that are women's names (for the salutation of the demo letters). */
+const WOMEN = new Set(['Aylin', 'Chantal', 'Elif', 'Femke', 'Hanna', 'Katarzyna', 'Mirela', 'Nadia', 'Roxanne', 'Tamara', 'Vera', 'Yasmin']);
+const WORKER_NATIONALITIES = ['NL', 'PL', 'RO', 'TR', 'MA', 'BG', 'PT', 'NL', 'HU', 'NL'];
+/** What a worker at a client of this sector usually does (codes of the `employee_function` list). */
+const FUNCTION_BY_SECTOR: Record<string, string[]> = {
+  cleaning: ['cleaner'],
+  taxi: ['driver'],
+  courier: ['courier', 'driver'],
+  hospitality: ['kitchen', 'service'],
+  construction: ['construction'],
+  transport: ['driver', 'warehouse'],
+  security: ['security'],
+  healthcare: ['care'],
+  retail: ['warehouse', 'service'],
+  business_services: ['administration'],
+  it: ['administration'],
+  staffing: ['warehouse', 'administration'],
+  agriculture: ['other', 'warehouse'],
+  other: ['other'],
+};
+
+const day = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+/** `n` days from today as `YYYY-MM-DD` (demo dates stay "soon" whenever the seed runs). */
+const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
 const seeders: DevSeeder[] = [
   {
     name: 'clients and people',
@@ -138,6 +182,97 @@ const seeders: DevSeeder[] = [
       const [taxiA, taxiB] = [byName.get('Taxi Rijnmond B.V.'), byName.get('Taxi Utrecht Centraal')].sort() as [string, string];
       if (taxiA && taxiB) await prisma.clientRelation.create({ data: { fromId: taxiA, toId: taxiB, kind: 'group' } });
       console.log(`  Added ${created.length} demo clients (the numbering continues after ${String(created.length).padStart(3, '0')}).`);
+    },
+  },
+  {
+    name: 'workers',
+    run: async prisma => {
+      if ((await prisma.employee.count()) > 0) {
+        console.log('  There are workers already — demo workers not added.');
+        return;
+      }
+      const clients = await prisma.client.findMany({ orderBy: { number: 'asc' } });
+      const functionNames = new Map((await prisma.listItem.findMany({ where: { list: { key: 'employee_function' } } })).map(item => [item.code, item.nameNl]));
+      let total = 0;
+      let stoppedWorkers = 0;
+
+      for (const [clientIndex, client] of clients.entries()) {
+        const sector = String((client.data as Record<string, unknown>).sector ?? 'other');
+        const functions = FUNCTION_BY_SECTOR[sector] ?? ['other'];
+        const contracts = await prisma.folder.findFirst({ where: { clientId: client.id, templateCode: 'contracts' } });
+        const fallback = contracts ?? (await prisma.folder.findFirstOrThrow({ where: { clientId: client.id, parentId: null } }));
+        let leaversFolder: string | null = null;
+        const count = client.isActive ? 2 + (clientIndex % 4) : 1 + (clientIndex % 2);
+
+        for (let slot = 0; slot < count; slot += 1) {
+          const seed = clientIndex * 11 + slot * 5;
+          const first = WORKER_FIRST_NAMES[seed % WORKER_FIRST_NAMES.length]!;
+          const [infix, last] = WORKER_LAST_NAMES[(seed * 3 + slot) % WORKER_LAST_NAMES.length]!;
+          const city = clientIndex % 3 === 0 ? 'Utrecht' : ['Amsterdam', 'Rotterdam', 'Den Haag', 'Almere', 'Zwolle', 'Eindhoven'][seed % 6]!;
+          const function_ = functions[(seed + slot) % functions.length]!;
+          const startDate = inDays(-(90 + ((seed * 37) % 1100)));
+          // Some leave: all of them at a client that stopped, otherwise about one in seven.
+          const left = !client.isActive || seed % 7 === 3;
+          const endDate = left ? (client.stoppedOn ? client.stoppedOn.toISOString().slice(0, 10) : inDays(-(5 + ((seed * 13) % 80)))) : null;
+          const rate = 12.5 + ((seed * 3) % 28) * 0.25;
+          const mobile = `+3166${digits(seed + 41, 8)}`;
+          const street = STREETS[(seed + 3) % STREETS.length]!;
+          const postalCode = `${1000 + ((seed * 211) % 8999)} ${POSTCODE_LETTERS[seed % POSTCODE_LETTERS.length]}`;
+          const nationality = WORKER_NATIONALITIES[seed % WORKER_NATIONALITIES.length]!;
+          const personData: Record<string, unknown> = {
+            ...(infix ? { infix } : {}),
+            salutation: WOMEN.has(first) ? 'mrs' : 'mr',
+            initials: `${first[0]}.`,
+            nationality,
+            date_of_birth: `${1975 + (seed % 25)}-${String(1 + (seed % 12)).padStart(2, '0')}-${String(1 + ((seed * 3) % 27)).padStart(2, '0')}`,
+            mobile,
+            email: `${slug(first)}.${slug(last)}@werknemer.example`,
+            street,
+            house_number: String(1 + ((seed * 5) % 120)),
+            postal_code: postalCode,
+            city,
+            id_type: seed % 3 === 0 ? 'passport' : 'id_card',
+            // A few documents are about to expire (or already have), so the "documents expiring" counter has something to show.
+            id_expiry: seed % 9 === 0 ? inDays(25 + (seed % 40)) : seed % 13 === 0 ? inDays(-20) : inDays(400 + ((seed * 29) % 1500)),
+            ...(nationality === 'NL' ? {} : { permit_type: 'eu_registration', permit_expiry: seed % 10 === 0 ? inDays(40) : inDays(500 + ((seed * 17) % 900)) }),
+          };
+          const person = await prisma.person.create({
+            data: {
+              firstName: first,
+              lastName: last,
+              data: personData as object,
+              searchText: fold([first, infix, last, personData.email, city, postalCode].filter(Boolean).join(' ')),
+            },
+          });
+          const employee = await prisma.employee.create({
+            data: {
+              personId: person.id,
+              clientId: client.id,
+              functionCode: function_,
+              startDate: day(startDate),
+              endDate: endDate ? day(endDate) : null,
+              isActive: !left,
+              ...(left && { deactivatedAt: new Date(), deactivationReason: client.isActive ? 'Contract beëindigd (demo)' : 'Klant gestopt (demo)' }),
+              data: slot === 0 ? { notes: 'Demo-werknemer' } : {},
+              searchText: fold(`${functionNames.get(function_) ?? function_}`),
+            },
+          });
+          // The hourly rate from the first day; every other worker got a raise at the start of this year.
+          await prisma.rateHistory.create({ data: { employeeId: employee.id, rate, validFrom: day(startDate) } });
+          if (slot % 2 === 1 && startDate < '2026-01-01') await prisma.rateHistory.create({ data: { employeeId: employee.id, rate: rate + 0.75, validFrom: day('2026-01-01'), note: 'Nieuwe CAO (demo)' } });
+
+          // The worker's folder: inside the contracts folder, or in `0-GESTOPT` once the worker left.
+          if (left && !leaversFolder) {
+            leaversFolder = (await prisma.folder.create({ data: { clientId: client.id, parentId: fallback.id, name: '0-GESTOPT', sortOrder: 0 } })).id;
+          }
+          await prisma.folder.create({
+            data: { clientId: client.id, parentId: left ? leaversFolder : fallback.id, employeeId: employee.id, name: [first, infix, last].filter(Boolean).join(' '), sortOrder: 1000 },
+          });
+          total += 1;
+          if (left) stoppedWorkers += 1;
+        }
+      }
+      console.log(`  Added ${total} demo workers (${stoppedWorkers} of them stopped).`);
     },
   },
 ];

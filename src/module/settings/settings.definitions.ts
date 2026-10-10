@@ -26,6 +26,13 @@ export const OFFICE_DEFINITIONS = {
   logoFileId: { type: 'string', default: '', maxLength: 60, group: 'branding' },
 } satisfies SettingDefinitions;
 
+export const DOCUMENTS_NAMESPACE = 'documents';
+
+/** How documents are watched: the lead time of "expires soon" (ID cards, residence permits, certificates). Phase 12 adds the rest (types, valid-until rules). */
+export const DOCUMENTS_DEFINITIONS = {
+  expiryWarningDays: { type: 'int', default: 90, min: 7, max: 365, group: 'expiry' },
+} satisfies SettingDefinitions;
+
 export const LOCALE_NAMESPACE = 'locale';
 
 export const LOCALES = ['nl', 'en'] as const;

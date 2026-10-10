@@ -32,6 +32,8 @@ import { SettingsFeatureModule } from './module/settings/settings.module.js';
 import { SecuritySettingsService } from './module/security-settings/security-settings.service.js';
 import { UsersModule } from './module/users/users.module.js';
 import { ClientsModule } from './module/clients/clients.module.js';
+import { PeopleModule } from './module/people/people.module.js';
+import { EmployeesModule } from './module/employees/employees.module.js';
 
 @Module({
   imports: [
@@ -80,6 +82,8 @@ import { ClientsModule } from './module/clients/clients.module.js';
     RolesModule,
     ActivityModule,
     ClientsModule,
+    PeopleModule,
+    EmployeesModule,
   ],
   providers: [
     { provide: APP_PIPE, useFactory: createValidationPipe },

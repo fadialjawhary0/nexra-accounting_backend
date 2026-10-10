@@ -11,7 +11,12 @@ export const parseDay = (day: string): Date => new Date(`${day}T00:00:00.000Z`);
 
 export const formatDay = (date: Date): string => date.toISOString().slice(0, 10);
 
-export const isValidDay = (value: unknown): value is string => typeof value === 'string' && DAY_PATTERN.test(value) && formatDay(parseDay(value)) === value;
+/** A real calendar day (`2026-02-30` and `2026-13-01` are not). */
+export const isValidDay = (value: unknown): value is string => {
+  if (typeof value !== 'string' || !DAY_PATTERN.test(value)) return false;
+  const date = parseDay(value);
+  return !Number.isNaN(date.getTime()) && formatDay(date) === value;
+};
 
 export const addDays = (day: string, days: number): string => formatDay(new Date(parseDay(day).getTime() + days * MS_PER_DAY));
 

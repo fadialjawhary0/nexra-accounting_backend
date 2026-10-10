@@ -69,7 +69,9 @@ src/
    ├─ calendar/         Netherlands calendar: holidays, working-day arithmetic, deadlines
    ├─ files/            uploads (type / size checks), authorised download
    ├─ forms/            the admin-defined forms: definitions, drafts, revisions, value validation
-   ├─ clients/          clients, their people and relations, folders / documents, data quality, export (Phase 6)
+   ├─ clients/          clients, their relations, folders / documents, data quality, export (Phase 6)
+   ├─ people/           the humans behind owners, directors, contact persons and workers: one record each, restricted values (Phase 6 / 7)
+   ├─ employees/        workers = a person employed by a client: grid, form, hourly-rate history, worker folders, export (Phase 7)
    └─ activity/         reads the audit trail, filter options, export   (contracts … follow)
 ```
 
@@ -125,6 +127,21 @@ src/
   transaction; every change writes an audit entry. A client is never deleted: `POST /clients/:id/status`.
 - **Numbers** — the `client` sequence is three digits wide; `NumberingService.normalize()` pads a typed number, `registerFloor()` keeps the suggestion above every number in use.
 - `npm run db:seed:dev` adds 28 synthetic demo clients (people, relations, folders) to a development database.
+
+## Employees (Phase 7)
+
+- **A worker is an employment of a person.** `Person` (module `people`: name, BSN, IBAN, address, ID document — the person form) + `Employee` (`personId`, `clientId`, `functionCode`,
+  `startDate`, `endDate`, status as `isActive`, every other field of the employee form in `data`) + `RateHistory` (`rate`, `validFrom`, `note`; today's rate = the latest row that has
+  started — `currentRateSql()` computes it in SQL so lists can sort and filter on it) + `Folder.employeeId`. Nothing is deleted: `POST /employees/:id/status`.
+- **Saving a worker saves the person too** — `PeopleService.planCreate / planUpdate` check the person form without writing; `EmployeesService` validates the employee form, merges both
+  sets of problems (the person's keys get a `person.` prefix) and commits everything in one transaction; a taken BSN is a 422 that names the holder (`details.conflicts`).
+- **Routes shared with Clients** use `@RequireAnyPermission('clients.view', 'employees.view')` (handler-level, any-of): `GET /people/:id`, `/people/lookup`, `GET /clients/lookup`.
+- **Folders** — `EmployeeFoldersService`: `<client folder>/<contracts folder>/<person name>`, `0-GESTOPT` for leavers, moved when the client changes, renamed with the person
+  (`PeopleService.onChanged`). A worker's files are `entityType=employee`; `GET /clients/:id/documents` includes them only for people with `employees.view`.
+- **List** — `GET /employees` joins `Employee`, `Person` and `Client`; filters are `f.<key>` (employee form) and `f.person.<key>` (person form); sort keys `name`, `client`, `status`,
+  `updatedAt`, `<key>`, `person.<key>`; `expiring=true`; `stats=true`. Documents expiring = date fields of the person form whose key ends in `_expiry`, within `documents.expiryWarningDays`
+  (`GET|PUT /settings/documents`, default 90) — only for people who may see those fields.
+- `npm run db:seed:dev` also adds 94 synthetic demo workers (with rate history, folders, a few expiring documents).
 
 New building blocks are created with the Nest CLI, always without spec files:
 `npx nest g module module/<name>`, `npx nest g service module/<name>/<name> --flat --no-spec`, …

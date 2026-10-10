@@ -10,6 +10,8 @@ export interface ValueContext {
   files: ReadonlyMap<string, { id: string; name: string; size: number; mimeType: string }>;
   /** Ids of the people who can be chosen in a `user` field (active staff). */
   users: ReadonlySet<string>;
+  /** Ids of the clients that exist among the values submitted for `client` fields. */
+  clients: ReadonlySet<string>;
   canView: (field: FieldDef) => boolean;
   canEdit: (field: FieldDef) => boolean;
 }
@@ -75,6 +77,9 @@ function parseValue(field: FieldDef, raw: unknown, context: ValueContext, curren
     case 'user':
       if (typeof raw !== 'string') return { error: 'validation.invalid' };
       return raw === current || context.users.has(raw) ? { value: raw } : { error: 'validation.selectOption' };
+    case 'client':
+      if (typeof raw !== 'string') return { error: 'validation.invalid' };
+      return raw === current || context.clients.has(raw) ? { value: raw } : { error: 'validation.selectOption' };
     case 'file': {
       const id = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as { id?: unknown }).id : undefined;
       const file = typeof id === 'string' ? context.files.get(id) : undefined;
