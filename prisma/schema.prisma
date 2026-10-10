@@ -1,0 +1,355 @@
+// Nexra B.V. — database schema (PostgreSQL 18, extensions citext / pg_trgm / unaccent are created in the first migration).
+//
+// Conventions for every model — keep them:
+//   id               String   @id @default(cuid())
+//   createdAt / updatedAt     DateTime @default(now()) / @updatedAt
+//   main records     isActive Boolean @default(true) + deactivatedAt / deactivatedById / deactivationReason
+//                    (inactive records stay for history and inspections — nothing is hard-deleted)
+//   dynamic fields   data Json @default("{}")          the admin-defined fields of a record (docs/12, docs/14)
+//   search           searchText String @default("")    lower-cased text for search (pg_trgm index)
+//   dates            DateTime @db.Date for a day, DateTime (timestamptz) for a moment
+//   restricted data  BSN / IBAN / wages go in their own column and are encrypted with CryptoService
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Audit trail: one row per create / update / delete / activate / sign-in … written through AuditService.
+model ActivityLog {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  /// Who did it (a user id from Phase 4; null for the system) and their name at that moment.
+  actorId     String?
+  actorLabel  String?
+  /// created · updated · deleted · activated · deactivated · signed_in · …
+  action      String
+  entityType  String
+  entityId    String?
+  /// Human-readable name of the record at that moment ("1042 – Bakkerij Jansen").
+  entityLabel String?
+  before      Json?
+  after       Json?
+  meta        Json?
+  ip          String?
+  userAgent   String?
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+}
+
+// ───────────────────────────── Access: users, roles, sessions ─────────────────────────────
+
+/// Codes only — the names shown on screen come from the status lookup table (Dutch + English), seeded later.
+/// Declared in sort order: active, invited, disabled.
+enum UserStatus {
+  active
+  invited
+  disabled
+}
+
+enum AuthTokenType {
+  invite
+  reset
+}
+
+model Role {
+  id               String   @id @default(cuid())
+  /// Stable slug: `owner`, `medewerker`, or the slug of the name an administrator typed.
+  key              String   @unique
+  name             String
+  description      String   @default("")
+  /// Built-in roles cannot be deleted; the owner role always keeps full access.
+  isSystem         Boolean  @default(false)
+  basedOn          String?
+  /// { area: [view, create, edit, delete, export, approve] } — see src/module/roles/permission-catalog.ts
+  permissions      Json     @default("{}")
+  /// Everyone with this role must use two-step verification.
+  requireTwoFactor Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  users            User[]
+}
+
+model User {
+  id                  String     @id @default(cuid())
+  /// Always stored lower-case.
+  email               String     @unique
+  name                String
+  title               String     @default("")
+  phone               String     @default("")
+  avatarUrl           String?
+  /// Language of e-mails and the first screen: nl | en.
+  locale              String     @default("nl")
+  status              UserStatus @default(invited)
+  roleId              String
+  role                Role       @relation(fields: [roleId], references: [id])
+  /// Per-user changes on top of the role: { area: { add?: [actions], remove?: [actions] } }. Removing `view` hides the page.
+  permissionOverrides Json       @default("{}")
+
+  passwordHash       String?
+  passwordChangedAt  DateTime?
+  /// Set for the seeded owner and after an administrator reset: the only thing the account may do is choose a new password.
+  mustChangePassword Boolean    @default(false)
+
+  twoFactorEnabled  Boolean @default(false)
+  /// TOTP secret, encrypted with CryptoService.
+  twoFactorSecret   String?
+  /// Last accepted 30-second time step — a code can never be used twice.
+  twoFactorLastStep Int?
+  /// An administrator made two-step verification mandatory for this person.
+  twoFactorRequired Boolean @default(false)
+
+  invitedAt    DateTime?
+  lastActiveAt DateTime?
+  disabledAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions      Session[]
+  authTokens    AuthToken[]
+  recoveryCodes RecoveryCode[]
+
+  @@index([status])
+  @@index([roleId])
+}
+
+/// One signed-in device. The refresh tokens of a session form a chain; reusing an old one revokes the whole session.
+model Session {
+  id            String         @id @default(cuid())
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt     DateTime       @default(now())
+  lastUsedAt    DateTime       @default(now())
+  /// Absolute end of the session (session length setting).
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  revokedReason String?
+  ip            String?
+  userAgent     String?
+  /// "Chrome on Windows"
+  device        String         @default("")
+  /// desktop | laptop | mobile | tablet
+  kind          String         @default("desktop")
+  refreshTokens RefreshToken[]
+
+  @@index([userId, revokedAt])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  sessionId String
+  session   Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  /// sha256 of the token — the token itself exists only in the browser's cookie.
+  tokenHash String    @unique
+  createdAt DateTime  @default(now())
+  /// Set when the token was exchanged for a new one.
+  usedAt    DateTime?
+  expiresAt DateTime
+
+  @@index([sessionId])
+}
+
+/// Invitation and password-reset links. Only a hash of the token is stored.
+model AuthToken {
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      AuthTokenType
+  tokenHash String        @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  @@index([userId, type])
+}
+
+model RecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// sha256 of the code.
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+/// Failed sign-in counters kept in the database (they survive a restart): per account + IP (`acct:<email>:<ip>`) and per IP (`ip:<ip>`).
+model LoginThrottle {
+  key         String    @id
+  failures    Int       @default(0)
+  lockedUntil DateTime?
+  updatedAt   DateTime  @updatedAt
+}
+
+/// Typed settings, defined and validated in code (src/lib/settings). Only values that differ from the default are stored.
+model Setting {
+  key         String   @id
+  value       Json
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+}
+
+// ───────────────────────────── Numbering ─────────────────────────────
+
+/// Running numbers (client number, later invoice and contract numbers). `next` is handed out atomically; Ahmad sets the prefix,
+/// the zero padding and where to continue in Settings → Numbering.
+model NumberSequence {
+  key         String   @id
+  prefix      String   @default("")
+  /// Pad with zeros to this many digits (0 = no padding).
+  padding     Int      @default(0)
+  /// The number the next record gets.
+  next        Int      @default(1)
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+}
+
+// ───────────────────────────── Pick-lists and status lookups ─────────────────────────────
+
+enum ListKind {
+  /// Choices people pick from (legal forms, banks, sectors …): Ahmad can add, rename, reorder and deactivate.
+  picklist
+  /// Statuses and types the program logic depends on: names, order and active flag are editable, the codes are fixed.
+  status
+}
+
+/// A pick-list or status lookup. Names are stored in Dutch and English; the API answers in the user's language.
+model List {
+  id            String     @id @default(cuid())
+  /// Stable slug the code uses (`legal_form`, `user_status`).
+  key           String     @unique
+  nameNl        String
+  nameEn        String
+  descriptionNl String     @default("")
+  descriptionEn String     @default("")
+  kind          ListKind   @default(picklist)
+  /// Seeded lists keep their key and cannot be deleted.
+  isSystem      Boolean    @default(false)
+  /// Whether Ahmad may add items (false for statuses the logic knows by code).
+  allowNewItems Boolean    @default(true)
+  items         ListItem[]
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+}
+
+model ListItem {
+  id        String   @id @default(cuid())
+  listId    String
+  list      List     @relation(fields: [listId], references: [id], onDelete: Cascade)
+  /// Stable machine code records store (`eenmanszaak`); never changes.
+  code      String
+  nameNl    String
+  nameEn    String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  /// Seeded items can be renamed and deactivated, never removed.
+  isSystem  Boolean  @default(false)
+  /// Presentation hints and logic flags: { tone: 'success', terminal: true }.
+  meta      Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([listId, code])
+  @@index([listId, sortOrder])
+}
+
+// ───────────────────────────── Netherlands calendar ─────────────────────────────
+
+enum HolidayKind {
+  /// Generated for every year (New Year's Day, Easter, King's Day …); Ahmad can rename or switch them off, not delete them.
+  official
+  /// Added by Ahmad: an office closure, a company outing, a holiday of one client.
+  custom
+}
+
+/// A day that is not a working day besides weekends. Every deadline and reminder in the app counts working days through CalendarService.
+model Holiday {
+  id        String      @id @default(cuid())
+  date      DateTime    @db.Date
+  nameNl    String
+  nameEn    String
+  kind      HolidayKind @default(official)
+  /// Staff are off AND paid on this day (depends on the CAO / contract). Does not change working-day counting.
+  isPaid    Boolean     @default(true)
+  isActive  Boolean     @default(true)
+  /// Generator code of an official holiday (`kings_day`) so a year is only generated once.
+  code      String?
+  /// Set when the day only applies to one client (clients arrive in Phase 6; stored as a plain id until then).
+  clientId  String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@unique([date, code])
+  @@index([date])
+}
+
+// ───────────────────────────── Files ─────────────────────────────
+
+/// Metadata of an uploaded file; the bytes live in StorageService under `storageKey`. Files are deactivated, never deleted, so
+/// documents stay available for history and inspections.
+model StoredFile {
+  id            String    @id @default(cuid())
+  /// The name people see ("KvK-uittreksel 2026.pdf").
+  name          String
+  /// Decided by the server from the extension (and checked against the file's first bytes), never trusted from the browser.
+  mimeType      String
+  size          Int
+  sha256        String
+  storageKey    String    @unique
+  /// What the upload is for: `office_logo`, `attachment` … (see src/module/files/files.constants.ts).
+  purpose       String
+  /// Permission area that decides who may open it (`companies`, `employees` …); null = every signed-in person (office logo).
+  area          String?
+  /// Optional link to a record: its type (`client`) and id.
+  entityType    String?
+  entityId      String?
+  isActive      Boolean   @default(true)
+  deactivatedAt DateTime?
+  uploadedById  String?
+  createdAt     DateTime  @default(now())
+
+  @@index([entityType, entityId])
+  @@index([purpose])
+}
+
+// ───────────────────────────── Form definitions (the form builder) ─────────────────────────────
+
+/// The editable form of one kind of record (`client`, `person` …): sections and fields as one JSON document (see
+/// src/module/forms/form-doc.ts). Every form, list column, filter, export, import and AI extraction reads it. One live document, an
+/// optional draft the form builder works on, and a snapshot per publication.
+model FormDefinition {
+  entity           String         @id
+  /// The published document.
+  live             Json
+  /// Unpublished changes (null when nothing is pending).
+  draft            Json?
+  revision         Int            @default(1)
+  publishedAt      DateTime       @default(now())
+  publishedById    String?
+  draftUpdatedAt   DateTime?
+  draftUpdatedById String?
+  revisions        FormRevision[]
+}
+
+model FormRevision {
+  id            String         @id @default(cuid())
+  entity        String
+  definition    FormDefinition @relation(fields: [entity], references: [entity], onDelete: Cascade)
+  revision      Int
+  doc           Json
+  note          String         @default("")
+  publishedAt   DateTime       @default(now())
+  publishedById String?
+
+  @@unique([entity, revision])
+}
