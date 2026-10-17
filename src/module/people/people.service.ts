@@ -6,6 +6,7 @@ import { conflictDetails, validationFailed } from '../../common/validation/failu
 import { Prisma, type Person } from '../../generated/prisma/client.js';
 import { AuditService } from '../../lib/audit/audit.service.js';
 import { PrismaService } from '../../lib/database/prisma.service.js';
+import { PERSON_FILE_TYPES } from '../document-settings/document-settings.constants.js';
 import { FilesService } from '../files/files.service.js';
 import { valuesFor } from '../forms/field-access.js';
 import { isEmptyValue, type FormDoc } from '../forms/form-doc.js';
@@ -145,7 +146,7 @@ export class PeopleService implements OnModuleInit {
         return {
           person,
           after: async () => {
-            await this.files.link(this.fileIds(doc, values), PERSON_ENTITY, person.id);
+            await this.linkFiles(doc, values, person.id);
             await this.audit.log({ action: 'created', entityType: 'person', entityId: person.id, entityLabel: personName(person), after: this.records.auditSnapshot(doc, values) });
           },
         };
@@ -192,7 +193,7 @@ export class PeopleService implements OnModuleInit {
         return {
           person: saved,
           after: async () => {
-            await this.files.link(this.fileIds(doc, values), PERSON_ENTITY, personId);
+            await this.linkFiles(doc, values, personId);
             await this.audit.log({ action: 'updated', entityType: 'person', entityId: personId, entityLabel: personName(saved), before: diff.before, after: diff.after });
             await this.changed(personId);
           },
@@ -239,11 +240,21 @@ export class PeopleService implements OnModuleInit {
 
   /* ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────── */
 
-  private fileIds(doc: FormDoc, values: Record<string, unknown>): string[] {
-    return doc.fields
+  /** Ties the files of the person form's file fields to the person; a copy of an ID or permit also becomes a document of that type. */
+  private async linkFiles(doc: FormDoc, values: Record<string, unknown>, personId: string): Promise<void> {
+    const byField = doc.fields
       .filter(field => field.type === 'file')
-      .map(field => (values[field.key] as { id?: unknown } | null | undefined)?.id)
-      .filter((id): id is string => typeof id === 'string');
+      .map(field => ({ key: field.key, id: (values[field.key] as { id?: unknown } | null | undefined)?.id }))
+      .filter((entry): entry is { key: string; id: string } => typeof entry.id === 'string');
+    await this.files.link(
+      byField.map(entry => entry.id),
+      PERSON_ENTITY,
+      personId,
+    );
+    for (const entry of byField) {
+      const docType = PERSON_FILE_TYPES[entry.key];
+      if (docType) await this.files.tag([entry.id], { docType });
+    }
   }
 
   /** `field key → holder's id` becomes `field key → { id, name }` so the screen can say who has the value. */

@@ -5,13 +5,14 @@ export type UserWithRole = User & { role: Role };
 export interface UserWorkload {
   /** Active clients the person is responsible for. */
   clients: number;
-  openForms: number;
+  /** Yearly tax returns assigned to the person that are not filed yet. */
+  openReturns: number;
   openInspections: number;
   openTasks: number;
   total: number;
 }
 
-export const EMPTY_WORKLOAD: UserWorkload = { clients: 0, openForms: 0, openInspections: 0, openTasks: 0, total: 0 };
+export const EMPTY_WORKLOAD: UserWorkload = { clients: 0, openReturns: 0, openInspections: 0, openTasks: 0, total: 0 };
 
 /** The user as the frontend knows it (no password hash, no 2FA secret). */
 export function serializeUser(user: UserWithRole, workload?: UserWorkload) {

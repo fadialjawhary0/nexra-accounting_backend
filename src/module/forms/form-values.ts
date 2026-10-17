@@ -1,4 +1,4 @@
-import { isValidDay } from '../../common/dates.js';
+import { isValidDay, todayInAmsterdam } from '../../common/dates.js';
 import { FORMATS } from '../../common/validation/formats.js';
 import { FORMAT_OF_TYPE, evaluate, isEmptyValue, type FieldDef, type FormDoc } from './form-doc.js';
 
@@ -61,7 +61,9 @@ function parseValue(field: FieldDef, raw: unknown, context: ValueContext, curren
       return { value };
     }
     case 'date':
-      return typeof raw === 'string' && isValidDay(raw) ? { value: raw } : { error: 'validation.invalidDate' };
+      if (typeof raw !== 'string' || !isValidDay(raw)) return { error: 'validation.invalidDate' };
+      if (validation.notFuture && raw > todayInAmsterdam()) return { error: 'validation.notInFuture' };
+      return { value: raw };
     case 'boolean':
       return typeof raw === 'boolean' ? { value: raw } : { error: 'validation.invalid' };
     case 'select': {

@@ -1,8 +1,9 @@
 import 'dotenv/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { fold } from '../src/common/text.js';
-import { PrismaClient } from '../src/generated/prisma/client.js';
+import { PrismaClient, type Prisma } from '../src/generated/prisma/client.js';
 import { folderNameOf } from '../src/module/clients/client-record.js';
+import { hoursAmountCents, invoiceTotals } from '../src/module/invoices/invoice-calc.js';
 
 /**
  * Synthetic demo data for a development database (made-up clients, people …) so screens have something to show.
@@ -115,7 +116,8 @@ const seeders: DevSeeder[] = [
         console.log('  There are clients already — demo clients not added.');
         return;
       }
-      const folderItems = await prisma.listItem.findMany({ where: { isActive: true, list: { key: 'client_folder' } }, orderBy: { sortOrder: 'asc' } });
+      // The standard folders of the folder template (the demo clients only get the top level, which is all the standard template has).
+      const folderItems = await prisma.folderTemplate.findMany({ where: { isActive: true, parentCode: null }, orderBy: { sortOrder: 'asc' } });
       const created: Array<{ id: string; name: string }> = [];
 
       for (const [index, demo] of CLIENTS.entries()) {
@@ -273,6 +275,262 @@ const seeders: DevSeeder[] = [
         }
       }
       console.log(`  Added ${total} demo workers (${stoppedWorkers} of them stopped).`);
+    },
+  },
+  {
+    name: 'contracts',
+    run: async prisma => {
+      if ((await prisma.contract.count()) > 0) {
+        console.log('  There are contracts already — demo contracts not added.');
+        return;
+      }
+      const employees = await prisma.employee.findMany({ include: { person: true, client: true }, orderBy: [{ client: { number: 'asc' } }, { createdAt: 'asc' }] });
+      const typeNames = new Map((await prisma.listItem.findMany({ where: { list: { key: 'contract_type' } } })).map(item => [item.code, item.nameNl]));
+      const rates = await prisma.rateHistory.findMany({ orderBy: { validFrom: 'desc' } });
+      const rateOf = new Map<string, number>();
+      for (const row of rates) if (!rateOf.has(row.employeeId)) rateOf.set(row.employeeId, row.rate.toNumber());
+      const monthsAfter = (iso: string, months: number) => {
+        const date = new Date(`${iso}T00:00:00.000Z`);
+        date.setUTCMonth(date.getUTCMonth() + months);
+        date.setUTCDate(date.getUTCDate() - 1);
+        return date.toISOString().slice(0, 10);
+      };
+      let total = 0;
+
+      for (const [index, employee] of employees.entries()) {
+        const name = [employee.person.firstName, ((employee.person.data ?? {}) as Record<string, unknown>).infix, employee.person.lastName].filter(Boolean).join(' ');
+        const start = employee.startDate ? employee.startDate.toISOString().slice(0, 10) : inDays(-200);
+        const rate = rateOf.get(employee.id) ?? 14;
+        const pattern = index % 10;
+        // The mix a real office has: mostly on-call, some fixed-term (a few ending soon), a permanent one, an old one that ended, a draft.
+        let type = 'on_call';
+        let status = 'active';
+        let from = start;
+        let to: string | null = null;
+        const data: Record<string, unknown> = { function: employee.functionCode ?? 'other', signing_place: 'Utrecht', signing_date: start };
+        if (pattern === 4 || pattern === 5) {
+          type = 'fixed_term';
+          to = inDays(8 + ((index * 11) % 85));
+          from = monthsAfter(to, -7).replace(/\d{2}$/, '01');
+          data.monthly_salary = 2150 + ((index * 40) % 500);
+          data.hours_per_week = 38;
+          data.working_days = 'maandag t/m vrijdag';
+          data.workplace = employee.client.name;
+          data.probation_months = 1;
+        } else if (pattern === 6) {
+          type = 'permanent';
+          data.monthly_salary = 2400 + ((index * 25) % 600);
+          data.hours_per_week = 40;
+        } else if (pattern === 7) {
+          type = 'fixed_term';
+          status = 'ended';
+          from = inDays(-420);
+          to = inDays(-40 - ((index * 3) % 60));
+          data.monthly_salary = 2100;
+        } else if (pattern === 8) {
+          status = 'draft';
+          from = inDays(5 + (index % 20));
+          data.hourly_rate = rate;
+        } else if (pattern === 9) {
+          type = 'internship';
+          to = inDays(60 + (index % 90));
+          from = monthsAfter(to, -5).replace(/\d{2}$/, '01');
+          data.monthly_salary = 450;
+        } else {
+          data.hourly_rate = rate;
+        }
+        let terminatedOn: Date | null = null;
+        let reason: string | null = null;
+        // A worker who left has no running contract: it ended with them.
+        if (!employee.isActive && status === 'active') {
+          status = 'terminated';
+          terminatedOn = employee.endDate;
+          reason = employee.client.isActive ? 'mutual' : 'client_ended';
+        }
+        const open = status === 'draft' || status === 'sent' || status === 'active';
+        const durationMonths = to ? Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / (30.44 * 86_400_000))) : null;
+        await prisma.contract.create({
+          data: {
+            clientId: employee.clientId,
+            employeeId: employee.id,
+            type,
+            status,
+            startDate: day(from),
+            endDate: to ? day(to) : null,
+            durationMonths,
+            signedOn: status === 'draft' ? null : day(from),
+            terminatedOn,
+            terminationReason: reason,
+            isActive: open,
+            ...(!open && { deactivatedAt: new Date() }),
+            data: data as object,
+            searchText: fold([employee.client.number, employee.client.name, name, typeNames.get(type)].filter(Boolean).join(' ')),
+          },
+        });
+        total += 1;
+      }
+      console.log(`  Added ${total} demo contracts (no Word documents: generate one from a contract's page).`);
+    },
+  },
+  {
+    name: 'hours',
+    run: async prisma => {
+      if ((await prisma.hourEntry.count()) > 0) {
+        console.log('  There are hours already — demo hours not added.');
+        return;
+      }
+      // Six weeks of work for most workers: full days Monday to Friday (some part-time), a Saturday now and then, a few evening shifts with clock times.
+      const employees = await prisma.employee.findMany({ include: { rates: { orderBy: { validFrom: 'asc' } } }, orderBy: [{ clientId: 'asc' }, { createdAt: 'asc' }] });
+      const workplaces = ['Hoofdlocatie', 'Magazijn', 'Locatie Utrecht', 'Locatie Rotterdam', 'Bij de klant'];
+      const entries: Prisma.HourEntryCreateManyInput[] = [];
+      for (const [index, employee] of employees.entries()) {
+        if (index % 3 === 0) continue;
+        const first = employee.startDate ? employee.startDate.toISOString().slice(0, 10) : inDays(-200);
+        const last = employee.endDate ? employee.endDate.toISOString().slice(0, 10) : inDays(0);
+        const fullTime = index % 4 !== 1;
+        for (let offset = -42; offset <= -1; offset += 1) {
+          const date = inDays(offset);
+          if (date < first || date > last) continue;
+          const weekday = new Date(`${date}T00:00:00.000Z`).getUTCDay();
+          if (weekday === 0 || (weekday === 6 && index % 7 !== 0) || (!fullTime && (weekday === 3 || weekday === 5))) continue;
+          const evening = index % 11 === 0 && weekday !== 6;
+          const rate = [...employee.rates].reverse().find(entry => entry.validFrom.toISOString().slice(0, 10) <= date)?.rate ?? null;
+          entries.push({
+            employeeId: employee.id,
+            clientId: employee.clientId,
+            date: day(date),
+            minutes: weekday === 6 ? 240 : fullTime ? 480 : 360,
+            ...(evening && { startTime: '16:00', endTime: '24:00', breakMinutes: 0, minutes: 480 }),
+            rate,
+            source: 'manual',
+            data: index % 5 === 0 ? { workplace: workplaces[index % workplaces.length] } : {},
+          });
+        }
+      }
+      await prisma.hourEntry.createMany({ data: entries });
+      console.log(`  Added ${entries.length} demo hour entries (the last six weeks, no salary statements: make one from Salary statements).`);
+    },
+  },
+  {
+    name: 'invoices',
+    run: async prisma => {
+      if ((await prisma.invoice.count()) > 0) {
+        console.log('  There are invoices already — demo invoices not added.');
+        return;
+      }
+      const staffing = await prisma.client.findFirst({ where: { name: 'Uitzendbureau Vooruit B.V.' } });
+      const security = await prisma.client.findFirst({ where: { name: 'Beveiliging Veilig B.V.' } });
+      if (!staffing || !security) {
+        console.log('  The demo clients are not there — demo invoices not added.');
+        return;
+      }
+      // The month before this one: the hours of the last six weeks cover it.
+      const start = new Date(`${inDays(0).slice(0, 7)}-01T00:00:00.000Z`);
+      start.setUTCMonth(start.getUTCMonth() - 1);
+      const from = start.toISOString().slice(0, 10);
+      const to = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+      const range = { gte: day(from), lte: day(to) };
+
+      const workersOf = (clientId: string) =>
+        prisma.employee.findMany({ where: { clientId, isActive: true, hourEntries: { some: { date: range } } }, include: { person: true }, orderBy: { createdAt: 'asc' }, take: 3 });
+      const minutesOf = async (ids: string[]) => new Map((await prisma.hourEntry.groupBy({ by: ['employeeId'], where: { employeeId: { in: ids }, date: range }, _sum: { minutes: true } })).map(row => [row.employeeId, row._sum.minutes ?? 0]));
+      const rateOf = async (ids: string[]) => {
+        const rows = await prisma.rateHistory.findMany({ where: { employeeId: { in: ids } }, orderBy: { validFrom: 'desc' } });
+        const map = new Map<string, number>();
+        for (const row of rows) if (!map.has(row.employeeId)) map.set(row.employeeId, row.rate.toNumber());
+        return map;
+      };
+      const mark = (employee: { id: string; data: unknown }, kind: string) => prisma.employee.update({ where: { id: employee.id }, data: { data: { ...((employee.data ?? {}) as Record<string, unknown>), work_kind: kind } } });
+      const fullName = (employee: { person: { firstName: string; lastName: string; data: unknown } }) => [employee.person.firstName, ((employee.person.data ?? {}) as Record<string, unknown>).infix, employee.person.lastName].filter(Boolean).join(' ');
+      const money = (cents: number) => cents / 100;
+
+      const agency = await prisma.counterparty.create({
+        data: {
+          name: 'Flexwerk Voorbeeld B.V.',
+          kvk: '99001001',
+          vatNumber: 'NL999001001B01',
+          data: { street: 'Industrieweg', house_number: '8', postal_code: '3542 AD', city: 'Utrecht', contact_person: 'A. Voorbeeld', email: 'administratie@flexwerk.example', iban: 'NL91ABNA0417164300' },
+          searchText: fold('Flexwerk Voorbeeld B.V. 99001001 Utrecht A. Voorbeeld administratie@flexwerk.example'),
+        },
+      });
+      const hirer = await prisma.counterparty.create({
+        data: {
+          name: 'Inlener Logistiek Voorbeeld B.V.',
+          kvk: '99001002',
+          vatNumber: 'NL999001002B01',
+          data: { street: 'Havenkade', house_number: '21', postal_code: '3011 AB', city: 'Rotterdam', contact_person: 'B. Voorbeeld', email: 'facturen@inlener.example' },
+          searchText: fold('Inlener Logistiek Voorbeeld B.V. 99001002 Rotterdam B. Voorbeeld facturen@inlener.example'),
+        },
+      });
+
+      // Outgoing: the staffing client bills a hirer for three of its workers (a draft: it is issued from the screen).
+      const hiredOut = await workersOf(staffing.id);
+      if (hiredOut.length) {
+        const ids = hiredOut.map(worker => worker.id);
+        const [minutes, rates] = await Promise.all([minutesOf(ids), rateOf(ids)]);
+        const lines = hiredOut.map(worker => {
+          const billed = minutes.get(worker.id) ?? 0;
+          const rateCents = Math.round((rates.get(worker.id) ?? 14) * 1.35 * 100);
+          return { worker, minutes: billed, rateCents, amountCents: hoursAmountCents(billed, rateCents) };
+        });
+        const totals = invoiceTotals({ lines: lines.map(line => ({ kind: 'hours', minutes: line.minutes, amountCents: line.amountCents })), vatBasisPoints: 2100, vatShifted: false, gAccountBasisPoints: 0 });
+        for (const worker of hiredOut) await mark(worker, 'hired_out');
+        await prisma.invoice.create({
+          data: {
+            direction: 'outgoing',
+            clientId: staffing.id,
+            counterpartyId: hirer.id,
+            periodFrom: day(from),
+            periodTo: day(to),
+            status: 'draft',
+            vatPercent: 21,
+            subtotal: money(totals.subtotalCents),
+            vatAmount: money(totals.vatCents),
+            total: money(totals.totalCents),
+            gAccountAmount: 0,
+            data: { reference: 'PO-DEMO-001', assignment: 'Orderpicking magazijn' },
+            searchText: fold(`concept ${staffing.number} ${staffing.name} ${hirer.name} PO-DEMO-001`),
+            lines: { create: lines.map((line, index) => ({ sortOrder: index, kind: 'hours', employeeId: line.worker.id, rawName: fullName(line.worker), fromDate: day(from), toDate: day(to), minutes: line.minutes, rate: money(line.rateCents), amount: money(line.amountCents) })) },
+          },
+        });
+      }
+
+      // Incoming: a staffing company bills the security client for two hired-in workers — one line bills four hours more than are registered.
+      const hiredIn = (await workersOf(security.id)).slice(0, 2);
+      if (hiredIn.length) {
+        const ids = hiredIn.map(worker => worker.id);
+        const [minutes, rates] = await Promise.all([minutesOf(ids), rateOf(ids)]);
+        const lines = hiredIn.map((worker, index) => {
+          const billed = (minutes.get(worker.id) ?? 0) + (index === 1 ? 240 : 0);
+          const rateCents = Math.round((rates.get(worker.id) ?? 14) * 1.4 * 100);
+          return { worker, minutes: billed, rateCents, amountCents: hoursAmountCents(billed, rateCents) };
+        });
+        const totals = invoiceTotals({ lines: lines.map(line => ({ kind: 'hours', minutes: line.minutes, amountCents: line.amountCents })), vatBasisPoints: 2100, vatShifted: false, gAccountBasisPoints: 2500 });
+        for (const worker of hiredIn) await mark(worker, 'hired_in');
+        await prisma.invoice.create({
+          data: {
+            direction: 'incoming',
+            clientId: security.id,
+            counterpartyId: agency.id,
+            number: 'FW-0417',
+            invoiceDate: day(inDays(-4)),
+            dueDate: day(inDays(26)),
+            periodFrom: day(from),
+            periodTo: day(to),
+            status: 'received',
+            vatPercent: 21,
+            subtotal: money(totals.subtotalCents),
+            vatAmount: money(totals.vatCents),
+            total: money(totals.totalCents),
+            gAccountPercent: 25,
+            gAccountAmount: money(totals.gAccountCents),
+            data: { reference: 'Bewaking evenementen' },
+            searchText: fold(`FW-0417 ${agency.name} ${security.number} ${security.name} Bewaking evenementen`),
+            lines: { create: lines.map((line, index) => ({ sortOrder: index, kind: 'hours', employeeId: line.worker.id, rawName: fullName(line.worker), fromDate: day(from), toDate: day(to), minutes: line.minutes, rate: money(line.rateCents), amount: money(line.amountCents) })) },
+          },
+        });
+      }
+      console.log('  Added 2 demo companies, one outgoing draft (to issue from the screen) and one incoming invoice with an hour difference.');
     },
   },
 ];

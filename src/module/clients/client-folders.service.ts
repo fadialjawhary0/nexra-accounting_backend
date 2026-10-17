@@ -2,43 +2,31 @@ import { ConflictException, Injectable, NotFoundException, UnprocessableEntityEx
 import type { Client, Prisma } from '../../generated/prisma/client.js';
 import { AuditService } from '../../lib/audit/audit.service.js';
 import { PrismaService } from '../../lib/database/prisma.service.js';
-import { SettingsService } from '../../lib/settings/settings.service.js';
-import { serializeFile } from '../files/files.service.js';
-import { matrixAllows, type PermissionMatrix } from '../roles/permission-catalog.js';
+import { FolderTemplatesService } from '../document-settings/folder-templates.service.js';
+import { DOCUMENT_PURPOSES, viewableAreas } from '../files/files.constants.js';
+import type { PermissionMatrix } from '../roles/permission-catalog.js';
 import { displayLabel, folderNameOf } from './client-record.js';
 import type { CreateFolderDto } from './dto/client.dto.js';
 
 /** A folder name people type: no characters a file name cannot hold, no double spaces. */
 const cleanName = (value: string): string => value.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
 
-const FILE_LIMIT = 2000;
-
 /**
- * A client's documents: the folder `<number>- <name>` with the standard sub-folders of the `client_folder` list (Settings → Lists),
- * made when the client is created, plus whatever folders people add. Folders are virtual — a file's bytes sit in storage under their own key.
+ * A client's folders: the folder `<number>- <name>` with the standard folders of the folder template (Settings → Documents → Folders), made when the
+ * client is created, plus whatever folders people add. Folders are virtual — a file's bytes sit in storage under their own key. (The documents in
+ * them are the Documents page's business.)
  */
 @Injectable()
 export class ClientFoldersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
-    private readonly settings: SettingsService,
+    private readonly templates: FolderTemplatesService,
   ) {}
 
-  /** Makes the root folder and the standard sub-folders. Call inside the transaction that creates the client. */
+  /** Makes the root folder and the standard folders. Call inside the transaction that creates the client. */
   async createFor(tx: Prisma.TransactionClient, client: Pick<Client, 'id' | 'number' | 'name'>): Promise<void> {
-    const template = await tx.listItem.findMany({ where: { isActive: true, list: { key: 'client_folder' } }, orderBy: [{ sortOrder: 'asc' }, { nameNl: 'asc' }] });
-    const english = this.settings.get<string>('locale.documentLocale') === 'en';
-    await tx.folder.create({
-      data: {
-        clientId: client.id,
-        name: folderNameOf(client),
-        sortOrder: 0,
-        children: {
-          create: template.map((item, index) => ({ clientId: client.id, name: cleanName(english ? item.nameEn : item.nameNl) || item.code, templateCode: item.code, sortOrder: (index + 1) * 10 })),
-        },
-      },
-    });
+    await this.templates.createFor(tx, client);
   }
 
   /** The root folder follows the client's number and name. */
@@ -46,28 +34,9 @@ export class ClientFoldersService {
     await tx.folder.updateMany({ where: { clientId: client.id, parentId: null }, data: { name: folderNameOf(client) } });
   }
 
-  /**
-   * Every folder and file of a client (the folder tree is flat here: each folder says which one it sits in). The folders of the client's
-   * workers sit inside the contracts folder with the workers' files — only people who may open workers see them.
-   */
-  async documents(clientId: string, matrix: PermissionMatrix) {
-    const withWorkers = matrixAllows(matrix, 'employees.view');
-    const [folders, files] = await Promise.all([
-      this.prisma.folder.findMany({ where: { clientId, isActive: true, ...(!withWorkers && { employeeId: null }) }, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] }),
-      this.prisma.storedFile.findMany({
-        where: { purpose: 'attachment', isActive: true, OR: [{ entityType: 'client', entityId: clientId }, ...(withWorkers ? [{ entityType: 'employee', folder: { clientId } }] : [])] },
-        orderBy: { createdAt: 'desc' },
-        take: FILE_LIMIT,
-      }),
-    ]);
-    return {
-      folders: folders.map(folder => ({ id: folder.id, parentId: folder.parentId, name: folder.name, templateCode: folder.templateCode, order: folder.sortOrder, employeeId: folder.employeeId })),
-      files: files.map(serializeFile),
-    };
-  }
-
-  async countFiles(clientId: string): Promise<number> {
-    return this.prisma.storedFile.count({ where: { entityType: 'client', entityId: clientId, purpose: 'attachment', isActive: true } });
+  /** How many documents of the client the person may open (the number on the client's Documents tab). */
+  async countFiles(clientId: string, matrix: PermissionMatrix): Promise<number> {
+    return this.prisma.storedFile.count({ where: { clientId, isActive: true, isCurrent: true, purpose: { in: [...DOCUMENT_PURPOSES] }, area: { in: viewableAreas(matrix) } } });
   }
 
   async create(client: Client, dto: CreateFolderDto) {

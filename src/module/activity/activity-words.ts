@@ -26,6 +26,9 @@ const ACTIONS: Record<string, Named> = {
   unlinked: { nl: 'Losgekoppeld', en: 'Unlinked' },
   ended: { nl: 'Beëindigd', en: 'Ended' },
   revealed: { nl: 'Gevoelige gegevens bekeken', en: 'Sensitive data viewed' },
+  completed: { nl: 'Afgerond', en: 'Completed' },
+  reopened: { nl: 'Heropend', en: 'Reopened' },
+  assigned: { nl: 'Toegewezen', en: 'Assigned' },
 };
 
 const ENTITIES: Record<string, Named> = {
@@ -42,6 +45,12 @@ const ENTITIES: Record<string, Named> = {
   client: { nl: 'Klant', en: 'Client' },
   person: { nl: 'Persoon', en: 'Person' },
   folder: { nl: 'Map', en: 'Folder' },
+  inspection: { nl: 'Controle', en: 'Inspection' },
+  checklist_template: { nl: 'Controlelijst', en: 'Checklist' },
+  task: { nl: 'Taak', en: 'Task' },
+  activity_log: { nl: 'Activiteitenlogboek', en: 'Activity log' },
+  calendar_event: { nl: 'Afspraak', en: 'Appointment' },
+  export_preset: { nl: 'Exportvoorkeur', en: 'Export preset' },
 };
 
 export const actionName = (code: string, locale: AppLocale): string => ACTIONS[code]?.[locale] ?? code;

@@ -114,11 +114,24 @@ model User {
   updatedAt    DateTime  @updatedAt
 
   sessions      Session[]
+  passwords     PasswordHistory[]
   authTokens    AuthToken[]
   recoveryCodes RecoveryCode[]
+  notifications Notification[]
 
   @@index([status])
   @@index([roleId])
+}
+
+/// A password a person used before (only its hash): the next ones may not repeat it (Settings → Security policy → "do not reuse the last N passwords").
+model PasswordHistory {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
 /// One signed-in device. The refresh tokens of a session form a chain; reusing an old one revokes the whole session.
@@ -313,17 +326,155 @@ model StoredFile {
   /// Optional link to a record: its type (`client`) and id.
   entityType    String?
   entityId      String?
+  /// What kind of document it is (code of a `DocumentType`), when known — set when it is uploaded, filed by an import or made by the system.
+  docType       String?
+  /// The date on the document (the day of a KvK extract, the date of a letter …).
+  docDate       DateTime? @db.Date
+  /// The day a document stops being valid, for types whose rule says "a date typed on the file". Other rules are worked out (see DocumentType.validity).
+  validUntil    DateTime? @db.Date
+  /// The stretch of time the document is about (a VAT return of the second quarter, a G-account statement of one month, the annual accounts of a year). The
+  /// checklists of inspections ask for documents "of the last 24 months" and need to know which months a file covers; empty = only `docDate` is known.
+  periodFrom    DateTime? @db.Date
+  periodTo      DateTime? @db.Date
+  /// The client whose documents it belongs to (worked out when the file is placed: its folder, its client or its worker's client); null = no client.
+  clientId      String?
+  client        Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
   /// The folder of the client's documents it sits in (null = not in a folder).
   folderId      String?
   folder        Folder?   @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  /// Versions: the id of the first version of this document (null while it has only one). A new version is a new row with the same root.
+  rootId        String?
+  version       Int       @default(1)
+  /// The version that counts (lists show only this one); older versions stay for history.
+  isCurrent     Boolean   @default(true)
+  /// Storage key of a PDF copy of a Word / Excel file, made the first time it is previewed.
+  previewKey    String?
   isActive      Boolean   @default(true)
   deactivatedAt DateTime?
   uploadedById  String?
   createdAt     DateTime  @default(now())
 
+  links           DocumentLink[]
+  text            DocumentText?
+  inspectionItems InspectionItemFile[]
+
   @@index([entityType, entityId])
   @@index([purpose])
   @@index([folderId])
+  @@index([docType])
+  @@index([sha256])
+  @@index([clientId, isActive])
+  @@index([rootId])
+  @@index([validUntil])
+}
+
+// ───────────────────────────── Documents ─────────────────────────────
+
+/// A kind of document (Settings → Documents): what it is called, who it is for, how long it stays valid, where it is filed and how its file is named.
+/// Types the import and the generators know by code are `isSystem`: they can be renamed and configured, never switched off.
+model DocumentType {
+  id             String             @id @default(cuid())
+  /// Stable code files store in `StoredFile.docType` (`kvk_extract`); never changes.
+  code           String             @unique
+  nameNl         String
+  nameEn         String
+  /// `client` (of the company), `worker` (of a worker; filed in the worker's folder) or `any`.
+  scope          String             @default("client")
+  /// How the end of validity is known: `none` (never), `age` (the date on the document + `validityMonths`), `date` (typed on the file) or `field` (a date in the worker's record, `validityField`).
+  validity       String             @default("none")
+  validityMonths Int?
+  /// The person-form field that holds the end date (`id_expiry`).
+  validityField  String?
+  /// Days before the end that the document counts as "expiring"; null = Settings → Documents.
+  warnDays       Int?
+  /// A new upload replaces the current document of the same client / worker as a new version.
+  versioned      Boolean            @default(false)
+  /// Copies of IDs and permits: only people who may see sensitive data open them.
+  personal       Boolean            @default(false)
+  /// The standard folder (a FolderTemplate code) it goes to when no folder is chosen.
+  folderCode     String?
+  /// How an uploaded file is named: `{type} {number} {date}` (see documents.naming.ts); empty = keep the name.
+  namePattern    String             @default("")
+  /// Words in a file name that point to this type (comma separated), on top of the built-in recognition.
+  keywords       String             @default("")
+  sortOrder      Int                @default(0)
+  isActive       Boolean            @default(true)
+  isSystem       Boolean            @default(false)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  required       RequiredDocument[]
+
+  @@index([isActive, sortOrder])
+}
+
+/// A standard folder of a client (Settings → Documents → Folders): made for every new client, inside the folder `<number>- <name>` or inside another
+/// standard folder. Folders that already exist are never moved or renamed by a change here.
+model FolderTemplate {
+  id         String           @id @default(cuid())
+  /// Stable code (`contracts`); `Folder.templateCode` refers to it.
+  code       String           @unique
+  /// The standard folder this one sits in (null = directly inside the client's folder).
+  parentCode String?
+  parent     FolderTemplate?  @relation("FolderTemplateTree", fields: [parentCode], references: [code], onDelete: Restrict)
+  children   FolderTemplate[] @relation("FolderTemplateTree")
+  nameNl     String
+  nameEn     String
+  sortOrder  Int              @default(0)
+  isActive   Boolean          @default(true)
+  isSystem   Boolean          @default(false)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+}
+
+/// "Every client / worker (that fits the condition) must have a current document of this type." Evaluated live against the files, so a changed rule
+/// applies at once and nothing is stored per client.
+model RequiredDocument {
+  id        String       @id @default(cuid())
+  typeCode  String
+  type      DocumentType @relation(fields: [typeCode], references: [code], onDelete: Restrict)
+  /// `client` or `worker`.
+  scope     String
+  /// Who it applies to, in the form builder's condition language over `client.<field>`, `employee.<field>` and `person.<field>`; null = everybody of the scope.
+  condition Json?
+  note      String       @default("")
+  sortOrder Int          @default(0)
+  isActive  Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([scope, isActive])
+}
+
+/// A file that also belongs to another record: a contract's signed copy, an invoice's PDF, a statement. The file stays where it is filed; the link
+/// makes it appear on the other record as well.
+model DocumentLink {
+  id          String     @id @default(cuid())
+  fileId      String
+  file        StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  /// `client`, `employee`, `contract`, `invoice`, `salary_statement`.
+  entityType  String
+  entityId    String
+  createdById String?
+  createdAt   DateTime   @default(now())
+
+  @@unique([fileId, entityType, entityId])
+  @@index([entityType, entityId])
+}
+
+/// The text of a document, read in the background for the content search. No row yet = not read yet.
+model DocumentText {
+  fileId      String     @id
+  file        StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  /// `done`, `empty` (no text in it: a scan or a photo), `unsupported` (a type that holds no text) or `failed`.
+  status      String
+  /// The text as it was read (cut off at 200 000 characters).
+  content     String     @default("")
+  /// The same without accents and capitals, for searching.
+  searchText  String     @default("")
+  pages       Int?
+  extractedAt DateTime   @default(now())
+
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
 }
 
 // ───────────────────────────── Form definitions (the form builder) ─────────────────────────────
@@ -387,11 +538,25 @@ model Client {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  people        ClientPerson[]
-  relationsFrom ClientRelation[] @relation("RelationFrom")
-  relationsTo   ClientRelation[] @relation("RelationTo")
-  folders       Folder[]
-  employees     Employee[]
+  people             ClientPerson[]
+  relationsFrom      ClientRelation[]  @relation("RelationFrom")
+  relationsTo        ClientRelation[]  @relation("RelationTo")
+  folders            Folder[]
+  documents          StoredFile[]
+  employees          Employee[]
+  contracts          Contract[]
+  templates          Template[]
+  hourEntries        HourEntry[]
+  statements         SalaryStatement[]
+  surcharges         SurchargeRule[]
+  invoices           Invoice[]
+  invoicesFromOthers Invoice[]         @relation("InvoiceOtherClient")
+  formSubmissions    FormSubmission[]
+  inspections        Inspection[]
+  vatPeriods         VatPeriod[]
+  taxReturns         TaxReturn[]
+  tasks              Task[]
+  calendarEvents     CalendarEvent[]
 
   @@index([isActive])
   @@index([legalForm])
@@ -402,20 +567,22 @@ model Client {
 /// An owner, director, partner or contact person of one or more clients. The columns are what lists and search need, the rest of
 /// the person form lives in `data` (sensitive values — BSN, document number — encrypted).
 model Person {
-  id                 String         @id @default(cuid())
+  id                 String           @id @default(cuid())
   firstName          String
   lastName           String
-  data               Json           @default("{}")
-  searchText         String         @default("")
-  isActive           Boolean        @default(true)
+  data               Json             @default("{}")
+  searchText         String           @default("")
+  isActive           Boolean          @default(true)
   deactivatedAt      DateTime?
   deactivatedById    String?
-  deactivationReason String         @default("")
+  deactivationReason String           @default("")
   createdById        String?
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
   clients            ClientPerson[]
   employments        Employee[]
+  formSubmissions    FormSubmission[]
+  taxReturns         TaxReturn[]
 
   @@index([lastName, firstName])
 }
@@ -456,7 +623,7 @@ model ClientRelation {
 // ───────────────────────────── Documents: folders ─────────────────────────────
 
 /// A folder in a client's documents. A client's root folder is `<number>- <name>`; the standard sub-folders come from the
-/// `client_folder` list (Settings → Lists). Folders are virtual — the bytes of a file sit in storage under their own key.
+/// folder template (Settings → Documents → Folders). Folders are virtual — the bytes of a file sit in storage under their own key.
 model Folder {
   id           String       @id @default(cuid())
   clientId     String
@@ -465,7 +632,7 @@ model Folder {
   parent       Folder?      @relation("FolderTree", fields: [parentId], references: [id], onDelete: Restrict)
   children     Folder[]     @relation("FolderTree")
   name         String
-  /// Code of the `client_folder` item it was made from; null for the root and for folders people added.
+  /// Code of the `FolderTemplate` it was made from; null for the root and for folders people added.
   templateCode String?
   sortOrder    Int          @default(0)
   isActive     Boolean      @default(true)
@@ -475,6 +642,7 @@ model Folder {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   files        StoredFile[]
+  inspections  Inspection[]
 
   @@index([clientId, parentId])
 }
@@ -521,8 +689,14 @@ model Employee {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  rates  RateHistory[]
-  folder Folder?
+  rates           RateHistory[]
+  folder          Folder?
+  contracts       Contract[]
+  hourEntries     HourEntry[]
+  periodLocks     PeriodLock[]
+  statements      SalaryStatement[]
+  invoiceLines    InvoiceLine[]
+  formSubmissions FormSubmission[]
 
   @@index([clientId, isActive])
   @@index([personId])
@@ -544,4 +718,1187 @@ model RateHistory {
   createdAt   DateTime @default(now())
 
   @@unique([employeeId, validFrom])
+}
+
+// ───────────────────────────── Document templates ─────────────────────────────
+
+/// A Word template with merge fields (`{employee.first_name}`). Every upload of a new Word file is a new version; documents that were made
+/// from an older version keep pointing at it. Templates are never deleted — they are switched off.
+model Template {
+  id              String            @id @default(cuid())
+  /// Stable slug of a template that ships with the system (`contract_on_call`); null for the ones people uploaded.
+  code            String?           @unique
+  name            String
+  /// Code of the `template_kind` list: contract, termination_letter, notice_letter, letter …
+  kind            String
+  /// `office` — for every client; `client` — only for the client in `clientId` (his own "Standaard" contracts).
+  scope           String            @default("office")
+  clientId        String?
+  client          Client?           @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  /// `nl` | `en` — the language the document is written in; dates, amounts and the names of choices are poured into it in that language.
+  language        String            @default("nl")
+  /// Code of the `contract_type` list a contract template is meant for: the type of the contract that is made with it.
+  contractType    String?
+  description     String            @default("")
+  isActive        Boolean           @default(true)
+  deactivatedAt   DateTime?
+  deactivatedById String?
+  createdById     String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  versions        TemplateVersion[]
+  contracts       Contract[]
+
+  @@index([kind, isActive])
+  @@index([clientId])
+}
+
+model TemplateVersion {
+  id          String             @id @default(cuid())
+  templateId  String
+  template    Template           @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  /// 1, 2, 3 … per template.
+  version     Int
+  /// The Word file (a StoredFile with purpose `template`).
+  fileId      String             @unique
+  fileName    String
+  /// The merge fields the file uses — `[{ tag: 'employee.first_name', kind: 'value', depth: 0 }]` — read from the file when it was uploaded.
+  tags        Json               @default("[]")
+  note        String             @default("")
+  createdById String?
+  createdAt   DateTime           @default(now())
+  contracts   Contract[]
+  documents   ContractDocument[]
+
+  @@unique([templateId, version])
+}
+
+// ───────────────────────────── Contracts ─────────────────────────────
+
+/// An employment contract of a worker at a client (the client is the employer). The columns are what the logic reads, sorts and joins on; every
+/// other field of the contract form (Settings → Forms) lives in `data`. Contracts are never deleted: they end, are terminated or cancelled.
+model Contract {
+  id                String             @id @default(cuid())
+  clientId          String
+  client            Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  employeeId        String
+  employee          Employee           @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  /// Code of the `contract_type` list: on_call, fixed_term, permanent, internship, freelance, services.
+  type              String
+  /// Code of the `contract_status` list: draft, sent, active, ended, terminated, cancelled.
+  status            String             @default("draft")
+  templateId        String?
+  template          Template?          @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  templateVersionId String?
+  templateVersion   TemplateVersion?   @relation(fields: [templateVersionId], references: [id], onDelete: SetNull)
+  startDate         DateTime           @db.Date
+  /// Empty for a permanent contract (and for an on-call contract without an end date).
+  endDate           DateTime?          @db.Date
+  /// Whole months from the first to the last day, calculated when saved — never typed.
+  durationMonths    Int?
+  /// The day it was given to the worker to sign / the day it was signed.
+  sentOn            DateTime?          @db.Date
+  signedOn          DateTime?          @db.Date
+  /// The contract this one continues (a renewal): the chain of fixed-term contracts.
+  renewalOfId       String?
+  renewalOf         Contract?          @relation("ContractChain", fields: [renewalOfId], references: [id], onDelete: SetNull)
+  renewals          Contract[]         @relation("ContractChain")
+  /// The last day of a contract that was ended early.
+  terminatedOn      DateTime?          @db.Date
+  /// Code of the `termination_reason` list.
+  terminationReason String?
+  /// Why — free text; for a cancelled contract the reason it was cancelled.
+  terminationNote   String             @default("")
+  /// When the terms (dates, wage, form fields) last changed: a Word document made before that no longer matches the contract.
+  termsChangedAt    DateTime           @default(now())
+  /// A draft, sent or running contract is active; one that ended, was terminated or cancelled is not (kept for history and inspections).
+  isActive          Boolean            @default(true)
+  deactivatedAt     DateTime?
+  deactivatedById   String?
+  data              Json               @default("{}")
+  searchText        String             @default("")
+  createdById       String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  documents         ContractDocument[]
+
+  @@index([clientId, status])
+  @@index([employeeId])
+  @@index([status, isActive])
+  @@index([endDate])
+  @@index([renewalOfId])
+  @@index([data], type: Gin)
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// A document of a contract: the contract itself (Word + PDF), a letter made from a template, or the signed scan. The files are StoredFiles in the
+/// worker's folder; a replaced document is switched off, not deleted.
+model ContractDocument {
+  id                String           @id @default(cuid())
+  contractId        String
+  contract          Contract         @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  /// `contract` (made from the contract's template), `letter` (made from another template) or `signed` (the signed scan).
+  kind              String
+  /// Code of the `template_kind` list for a letter (`termination_letter` …).
+  letterKind        String?
+  title             String
+  templateId        String?
+  templateVersionId String?
+  templateVersion   TemplateVersion? @relation(fields: [templateVersionId], references: [id], onDelete: SetNull)
+  /// The Word file — or, for a signed scan, the scan itself.
+  fileId            String
+  /// The PDF made from the Word file (empty when LibreOffice was not available).
+  pdfFileId         String?
+  isActive          Boolean          @default(true)
+  createdById       String?
+  createdAt         DateTime         @default(now())
+
+  @@index([contractId, kind])
+}
+
+// ───────────────────────────── Reminders, notifications, messages ─────────────────────────────
+
+/// "Tell these people N days before something happens." Features register what can be watched (a contract's end date, the end of probation …);
+/// the rule says how many days before, in calendar or working days, who is told and how. Several rules per trigger are allowed.
+model ReminderRule {
+  id         String         @id @default(cuid())
+  /// Which date is watched — a code a feature registered: `contract_end`, `contract_notice`, `probation_end`, `on_call_year`.
+  trigger    String
+  name       String
+  isActive   Boolean        @default(true)
+  /// Days before the date, several allowed (0 = on the day): `[30, 14]`.
+  offsets    Json           @default("[]")
+  /// `calendar` or `working` (the Dutch calendar: weekends and holidays do not count).
+  dayType    String         @default("calendar")
+  /// Who is told: `{ roles: ['owner'], users: ['<user id>'], responsible: true }` — the roles' people, chosen people and the client's responsible staff member.
+  recipients Json           @default("{}")
+  /// `in_app`, `email`.
+  channels   Json           @default("[\"in_app\"]")
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  sent       ReminderSent[]
+
+  @@index([trigger])
+}
+
+/// A reminder that was sent (or deliberately skipped), so nothing is ever sent twice. A changed date (a contract that was extended) is a new `dueOn`
+/// and therefore reminds again.
+model ReminderSent {
+  id          String       @id @default(cuid())
+  ruleId      String
+  rule        ReminderRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  /// What the reminder is about: `contract` + the contract's id.
+  subjectType String
+  subjectId   String
+  /// The date that is watched.
+  dueOn       DateTime     @db.Date
+  /// The offset of the rule that fired.
+  offset      Int
+  /// `sent`, or `skipped` — an earlier (larger) offset that had already passed when the rule first saw the item.
+  outcome     String       @default("sent")
+  sentAt      DateTime     @default(now())
+
+  @@unique([ruleId, subjectType, subjectId, dueOn, offset])
+  @@index([subjectType, subjectId])
+}
+
+/// An item in somebody's inbox (the bell). The text is stored as a message key + values and written in the reader's language when it is read.
+model Notification {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Code of the `notification_type` list: contract, deadline, document, inspection, task, mention, email, system.
+  type       String
+  /// `info`, `warning`, `critical`.
+  severity   String    @default("info")
+  /// Key in src/module/notifications/notification-texts.ts.
+  textKey    String
+  params     Json      @default("{}")
+  /// The record it is about and the screen that shows it.
+  entityType String?
+  entityId   String?
+  link       String?
+  /// The reminder rule that made it (null for other notifications).
+  ruleId     String?
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+}
+
+/// Which channel a person wants for which type of notification. A row only exists for a choice that differs from the default (everything on).
+model NotificationPreference {
+  userId String
+  type   String
+  inApp  Boolean @default(true)
+  email  Boolean @default(true)
+
+  @@id([userId, type])
+}
+
+/// A ready-made message (WhatsApp) with merge fields, opened from the "Open WhatsApp" button of a contract, a reminder or a worker.
+model MessageTemplate {
+  id        String   @id @default(cuid())
+  /// Stable slug of a message that ships with the system (`contract_ending`); null for the ones people added.
+  code      String?  @unique
+  name      String
+  /// `whatsapp`.
+  channel   String   @default("whatsapp")
+  /// Which record's fields can be used: `contract`.
+  scope     String   @default("contract")
+  /// Who the message is written to: `worker` (the employee) or `client` (the client's contact person).
+  audience  String   @default("worker")
+  bodyNl    String
+  bodyEn    String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([channel, scope, isActive])
+}
+
+// ───────────────────────────── Hours & salary statements ─────────────────────────────
+
+/// One stretch of work of one worker on one day (a day can hold several: two places, two shifts). `minutes` is the worked time with the break already
+/// taken off. `rate` is the hourly rate that applied on that day: it is taken from the rate history when the hours are saved and follows later changes
+/// of that history until the day is closed (a salary statement was made, or the office closed the period). Hours are facts: an entry is deleted when
+/// it was entered wrongly — the audit log keeps what was there.
+model HourEntry {
+  id           String   @id @default(cuid())
+  employeeId   String
+  employee     Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  /// The employer the worker belonged to that day — kept, so moving a worker to another client never rewrites old hours.
+  clientId     String
+  client       Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  date         DateTime @db.Date
+  minutes      Int
+  /// Optional clock times (`08:00`, `17:30`): when both are given the minutes are the time between them minus the break (needed for evening surcharges).
+  startTime    String?
+  endTime      String?
+  breakMinutes Int      @default(0)
+  rate         Decimal? @db.Decimal(10, 2)
+  /// `manual` · `copy` · `import` · `ai`
+  source       String   @default("manual")
+  /// The `hour_entry` form (Settings → Forms): where the work was done, for which hirer, a note …
+  data         Json     @default("{}")
+  createdById  String?
+  createdAt    DateTime @default(now())
+  updatedById  String?
+  updatedAt    DateTime @updatedAt
+
+  @@index([employeeId, date])
+  @@index([clientId, date])
+  @@index([date])
+}
+
+/// An extra pay rule: a percentage of the hourly rate (or a fixed amount per hour) for hours on weekend days, on public holidays, after so many hours
+/// (overtime) or in the evening. The office switches rules on; the ones that ship with the system are examples and start switched off.
+model SurchargeRule {
+  id            String   @id @default(cuid())
+  name          String
+  /// `weekend` · `holiday` · `overtime` · `evening`
+  kind          String
+  /// What the kind needs: weekend — `{ days: ['sat'] }`; overtime — `{ per: 'day' | 'week', afterMinutes: 480 }`; evening — `{ from: '20:00', to: '24:00' }`.
+  conditions    Json     @default("{}")
+  /// Added to the hourly rate: `25` = + 25 %.
+  percent       Decimal? @db.Decimal(6, 2)
+  /// Or a fixed amount per hour (one of the two).
+  amountPerHour Decimal? @db.Decimal(10, 2)
+  /// Only for this client (what its collective agreement says); empty = every client.
+  clientId      String?
+  client        Client?  @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  note          String   @default("")
+  sortOrder     Int      @default(0)
+  isActive      Boolean  @default(true)
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([isActive, kind])
+  @@index([clientId])
+}
+
+/// Days of one worker that are closed: a salary statement or an invoice was made for them, or the office closed the period. Changing a closed day needs the
+/// permission to approve and a reason; every such change is in the audit log. The lock of a statement / invoice goes away when that statement / invoice is
+/// cancelled (or credited).
+model PeriodLock {
+  id          String           @id @default(cuid())
+  employeeId  String
+  employee    Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  fromDate    DateTime         @db.Date
+  toDate      DateTime         @db.Date
+  /// `statement` — made by a salary statement · `invoice` — an invoice line covers the days · `manual` — the office closed the period.
+  kind        String
+  statementId String?
+  statement   SalaryStatement? @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  invoiceId   String?
+  invoice     Invoice?         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  note        String           @default("")
+  createdById String?
+  createdAt   DateTime         @default(now())
+
+  @@index([employeeId, fromDate, toDate])
+  @@index([statementId])
+  @@index([invoiceId])
+}
+
+/// What was paid to one worker for a period, frozen when the statement is made: every line with the rate, the surcharges and the amount, so the
+/// document, the inspector's question ("Yousef in August") and the reconciliation of hours, salary and invoices all read the same numbers. A statement
+/// is never edited — it is cancelled (releasing its days) and made again.
+model SalaryStatement {
+  id               String       @id @default(cuid())
+  employeeId       String
+  employee         Employee     @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  clientId         String
+  client           Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  periodFrom       DateTime     @db.Date
+  periodTo         DateTime     @db.Date
+  /// `final` · `cancelled`
+  status           String       @default("final")
+  totalMinutes     Int
+  daysCount        Int
+  baseAmount       Decimal      @db.Decimal(12, 2)
+  surchargeAmount  Decimal      @db.Decimal(12, 2)
+  grossAmount      Decimal      @db.Decimal(12, 2)
+  allowancePercent Decimal      @db.Decimal(5, 2)
+  allowanceAmount  Decimal      @db.Decimal(12, 2)
+  totalAmount      Decimal      @db.Decimal(12, 2)
+  /// Vacation hours built up over the worked hours, in minutes (0 when the worker builds up none).
+  vacationMinutes  Int          @default(0)
+  /// The lines (work and surcharges) in cents: `[{ type, date, minutes, rateCents, where, label, percent, amountCents, entryIds }]`.
+  lines            Json
+  /// What the system noticed when it was made: `[{ code, severity, params }]`.
+  warnings         Json         @default("[]")
+  /// The language of the documents.
+  locale           String       @default("nl")
+  note             String       @default("")
+  /// The Word and PDF files made from the statement template (filed in the worker's folder).
+  templateId       String?
+  templateVersion  Int?
+  fileId           String?
+  pdfFileId        String?
+  createdById      String?
+  createdAt        DateTime     @default(now())
+  cancelledAt      DateTime?
+  cancelledById    String?
+  cancelReason     String       @default("")
+  locks            PeriodLock[]
+
+  @@index([employeeId, periodFrom])
+  @@index([clientId, periodFrom])
+  @@index([status, periodFrom])
+}
+
+// ───────────────────────────── Invoices ─────────────────────────────
+
+/// A company that takes part in the staffing chain but is not a client of the office: the staffing agency that supplies workers (it issues the incoming
+/// invoices) or a company that hires workers (it receives the outgoing ones). A company that IS a client is used through the client itself. The columns are
+/// what lists and search need; the rest of the company form (address, bank, contact person …) lives in `data`.
+model Counterparty {
+  id                 String    @id @default(cuid())
+  name               String
+  kvk                String?
+  vatNumber          String?
+  data               Json      @default("{}")
+  searchText         String    @default("")
+  isActive           Boolean   @default(true)
+  deactivatedAt      DateTime?
+  deactivatedById    String?
+  deactivationReason String    @default("")
+  createdById        String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  invoices Invoice[]
+
+  @@index([isActive])
+  @@index([kvk])
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// An invoice that is about hours worked. `incoming` — a staffing company bills one of the office's clients for workers it supplied; `outgoing` — a client
+/// bills a company that used its workers. `client` is always the office's client whose administration the invoice belongs to; the other party is a counterparty
+/// or another client (exactly one of the two). A credit note (`kind` credit) takes a whole invoice back (`creditOfId`) and carries negative amounts. Which hours
+/// an invoice covers is worked out from its lines (worker + period + hours), it is never stored — so a change in the hours can never leave a stale link.
+model Invoice {
+  id              String        @id @default(cuid())
+  /// `incoming` · `outgoing`
+  direction       String
+  /// `invoice` · `credit`
+  kind            String        @default("invoice")
+  clientId        String
+  client          Client        @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  counterpartyId  String?
+  counterparty    Counterparty? @relation(fields: [counterpartyId], references: [id], onDelete: Restrict)
+  otherClientId   String?
+  otherClient     Client?       @relation("InvoiceOtherClient", fields: [otherClientId], references: [id], onDelete: Restrict)
+  /// Incoming: the number on the document. Outgoing: given when the invoice is issued (empty while it is a draft).
+  number          String?
+  invoiceDate     DateTime?     @db.Date
+  dueDate         DateTime?     @db.Date
+  periodFrom      DateTime      @db.Date
+  periodTo        DateTime      @db.Date
+  /// Code of the `invoice_status` list.
+  status          String
+  vatPercent      Decimal       @default(0) @db.Decimal(5, 2)
+  /// "BTW verlegd": the receiver declares the VAT, none is added.
+  vatShifted      Boolean       @default(false)
+  subtotal        Decimal       @default(0) @db.Decimal(12, 2)
+  vatAmount       Decimal       @default(0) @db.Decimal(12, 2)
+  total           Decimal       @default(0) @db.Decimal(12, 2)
+  /// The part of the total that is paid into the supplier's G-account (blocked account for payroll tax and VAT) instead of its ordinary account.
+  gAccountPercent Decimal       @default(0) @db.Decimal(5, 2)
+  gAccountAmount  Decimal       @default(0) @db.Decimal(12, 2)
+  paidOn          DateTime?     @db.Date
+  /// The language of the document the system makes (outgoing invoices).
+  locale          String        @default("nl")
+  note            String        @default("")
+  /// The other fields of the invoice form, by field key.
+  data            Json          @default("{}")
+  searchText      String        @default("")
+  /// The document: the Word file the system made (outgoing) or the file that was uploaded (incoming), and the PDF of it.
+  fileId          String?
+  pdfFileId       String?
+  templateId      String?
+  templateVersion Int?
+  /// A credit note points at the invoice it takes back.
+  creditOfId      String?
+  creditOf        Invoice?      @relation("InvoiceCredit", fields: [creditOfId], references: [id], onDelete: Restrict)
+  credits         Invoice[]     @relation("InvoiceCredit")
+  issuedAt        DateTime?
+  issuedById      String?
+  cancelledAt     DateTime?
+  cancelledById   String?
+  cancelReason    String        @default("")
+  createdById     String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  lines InvoiceLine[]
+  locks PeriodLock[]
+
+  @@index([clientId, direction, status])
+  @@index([counterpartyId])
+  @@index([otherClientId])
+  @@index([periodFrom, periodTo])
+  @@index([status])
+  @@index([creditOfId])
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// One line of an invoice. An `hours` line is a worker's hours over a period at a rate (the worker is linked when known; `rawName` is the name as it stands
+/// on the document and is kept when the worker could not be linked); `markup` is a staffing company's separate markup; `other` is anything else (a fee, a
+/// rounding correction). `amount` is what the document says — it may differ from hours × rate, and the reconciliation points that out.
+model InvoiceLine {
+  id          String    @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  sortOrder   Int       @default(0)
+  /// `hours` · `markup` · `other`
+  kind        String    @default("hours")
+  employeeId  String?
+  employee    Employee? @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  rawName     String    @default("")
+  description String    @default("")
+  fromDate    DateTime? @db.Date
+  toDate      DateTime? @db.Date
+  /// Billed time in whole minutes (negative on a credit note); 0 for lines without hours.
+  minutes     Int       @default(0)
+  rate        Decimal?  @db.Decimal(10, 2)
+  amount      Decimal   @db.Decimal(12, 2)
+
+  @@index([invoiceId, sortOrder])
+  @@index([employeeId, fromDate, toDate])
+}
+
+/// The consecutive numbers of the outgoing invoices of one client (every issuer numbers its own invoices without gaps). `year` is 0 for a series that does
+/// not restart each year.
+model InvoiceCounter {
+  clientId String
+  year     Int
+  next     Int    @default(1)
+
+  @@id([clientId, year])
+}
+
+/// One import: a spreadsheet read by code (`spreadsheet`: clients, workers or hours), a batch of files read by the AI queue (`documents`), or a message
+/// to the AI inbox on the dashboard (`inbox`: what a person asks in their own words, with or without files).
+model ImportJob {
+  id          String       @id @default(cuid())
+  /// `spreadsheet` · `documents` · `inbox`
+  kind        String
+  name        String
+  /// `draft` (being set up) · `processing` (the background is working) · `ready` (waiting for a person) · `paused` · `done` · `cancelled`
+  status      String       @default("draft")
+  /// What the background is doing while `processing`: `understanding` (the message of an inbox) · `reading` (files) · `checking` / `committing` (a spreadsheet) · `accepting`
+  activity    String?
+  /// Spreadsheets: what the rows become — `client` · `employee` · `hours`.
+  target      String?
+  /// Spreadsheets: the sheet, the header row, the column mapping and what to do with rows that exist already. Documents: the folder name, what to read.
+  /// Inbox: the message (`instruction`) and what the AI made of it (`message`), the client and the worker its files are about.
+  options     Json         @default("{}")
+  /// The uploaded spreadsheet.
+  fileId      String?
+  note        String       @default("")
+  createdById String
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  items       ImportItem[]
+
+  @@index([createdAt])
+  @@index([status])
+}
+
+/// One file or one row of an import — or one thing the message of an inbox asks for — with what was read from it and what happened to it.
+model ImportItem {
+  id           String    @id @default(cuid())
+  jobId        String
+  job          ImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  sortOrder    Int       @default(0)
+  /// `file` · `row` · `action` (something the message of an inbox asks for: a task, an appointment …)
+  kind         String
+  /// An action: what accepting it makes or changes — `task` · `event` (an appointment) · `employee` · `employee_stop` · `client`.
+  target       String?
+  /// `pending` · `processing` · `review` (read, waiting for a person) · `ready` / `invalid` (a checked row) · `accepted` · `rejected` · `skipped` · `error`
+  status       String    @default("pending")
+  /// The file name, or the sheet row ("Rij 12").
+  name         String
+  /// A file's path inside the uploaded folder or ZIP ("042- Naam/Arbeidsovereenkomst/Jan.pdf").
+  path         String    @default("")
+  fileId       String?
+  size         Int?
+  sha256       String?
+  /// Code of a `DocumentType`.
+  docType      String?
+  clientId     String?
+  employeeId   String?
+  personId     String?
+  /// What accepting does: `create` · `update` · `attach` (file only) · `skip`.
+  action       String?
+  /// The values, per record: `{ person: {...}, client: {...}, … }` — keyed by form field; restricted values are encrypted like in the records themselves.
+  data         Json      @default("{}")
+  /// How sure the reading was, per value (0–1).
+  confidence   Json      @default("{}")
+  /// The lowest confidence among the values that matter (0–1); null when nothing was read by the AI.
+  score        Float?
+  warnings     Json      @default("[]")
+  /// `section.field → message key` — what is wrong with the values.
+  errors       Json      @default("{}")
+  /// What accepting made: `{ type: 'client', id }`.
+  result       Json?
+  message      String    @default("")
+  attempts     Int       @default(0)
+  /// One line on what this is, for the list.
+  summary      String    @default("")
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([jobId, status])
+  @@index([jobId, sortOrder])
+}
+
+/// A saved column mapping of a spreadsheet layout (his `KLANTEN` sheet): a sheet with the same headings gets it suggested.
+model ImportMapping {
+  id          String   @id @default(cuid())
+  name        String
+  /// `client` · `employee` · `hours`
+  target      String
+  /// The column headings of the layout, normalised, in order.
+  headers     Json     @default("[]")
+  /// `[{ header: "Bedrijf", field: "name" }]` — the field is a form field key (`person.first_name` for the person's own form).
+  columns     Json     @default("[]")
+  /// The header row, whether the sheet holds stopped records, how the owner's role is called …
+  options     Json     @default("{}")
+  /// Shipped with the system (cannot be deleted, can be switched off).
+  isSystem    Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([target, name])
+}
+
+/// One call to the AI: what it was for, how many tokens it used and what that cost (an estimate from the model's price) — so Ahmad sees what it costs him.
+model AiUsage {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  feature      String
+  model        String
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  cachedTokens Int      @default(0)
+  /// US dollars (the AI provider bills in dollars).
+  cost         Decimal  @default(0) @db.Decimal(12, 6)
+  /// `ok` · `error` · `refused`
+  status       String
+  error        String   @default("")
+  itemId       String?
+  userId       String?
+  durationMs   Int      @default(0)
+
+  @@index([createdAt])
+  @@index([feature, createdAt])
+}
+
+// ───────────────────────────── Official forms & post ─────────────────────────────
+
+/// Somebody the office sends post to (the tax office, a bank …): what is printed on an envelope label and what a form suggests as its recipient.
+/// Never deleted — switched off.
+model AddressBookEntry {
+  id                String           @id @default(cuid())
+  name              String
+  /// The second line: a team or a department ("Team WKA").
+  department        String           @default("")
+  street            String           @default("")
+  houseNumber       String           @default("")
+  houseNumberSuffix String           @default("")
+  /// A P.O. box or freepost number ("9048", "21020"); printed with its word (`boxKind`) instead of a street.
+  box               String           @default("")
+  /// `po_box` (Postbus) or `freepost` (Antwoordnummer).
+  boxKind           String           @default("po_box")
+  postalCode        String           @default("")
+  city              String           @default("")
+  /// ISO country code; the country is printed under the city when it is not NL.
+  country           String           @default("NL")
+  /// Code of the `address_category` list.
+  category          String           @default("other")
+  note              String           @default("")
+  sortOrder         Int              @default(0)
+  isActive          Boolean          @default(true)
+  deactivatedAt     DateTime?
+  deactivatedById   String?
+  createdById       String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  /// Accent-free lower-case text for the quick search.
+  searchText        String           @default("")
+  forms             OfficialForm[]
+  submissions       FormSubmission[]
+
+  @@index([isActive, category])
+}
+
+/// An official PDF form of the library (Melding loonheffingen, Verzoek deblokkering G-rekening …): who it is for, where it goes, how its file is named.
+/// The PDFs themselves are its versions. Never deleted — switched off.
+model OfficialForm {
+  id              String                @id @default(cuid())
+  /// Stable slug (`melding_loonheffingen`).
+  code            String                @unique
+  nameNl          String
+  nameEn          String
+  descriptionNl   String                @default("")
+  descriptionEn   String                @default("")
+  /// The code printed on the form itself ("CPT 158").
+  authorityCode   String                @default("")
+  /// The page of the issuing authority where the form is published.
+  officialUrl     String                @default("")
+  /// What the form is about, which decides what is asked after the client: `client`, `person` (an owner, director or partner) or `worker`.
+  subject         String                @default("client")
+  /// `none`, `year` (a calendar year) or `range` (from – to).
+  periodKind      String                @default("none")
+  /// The address the form goes to (suggested for the envelope).
+  recipientId     String?
+  recipient       AddressBookEntry?     @relation(fields: [recipientId], references: [id], onDelete: SetNull)
+  /// Days after sending when an answer is expected: a reminder is made then. Null = no follow-up.
+  followUpDays    Int?
+  /// Warn when the client has a form of this kind that was sent and has not been dealt with (a second request would be refused).
+  warnWhenPending Boolean               @default(false)
+  /// Code of the document type the filled form is filed as, and the standard folder it goes to (empty = the type's own).
+  docType         String                @default("form")
+  folderCode      String?
+  /// How the filled file is named: `{type}_{number}_{date}` — the words of Settings → Documents → Types (`{type}` is the name of the form).
+  namePattern     String                @default("{type}_{number}_{date}")
+  /// Make the filled PDF final (its fields are flattened); by default the fields stay editable.
+  flatten         Boolean               @default(false)
+  sortOrder       Int                   @default(0)
+  isActive        Boolean               @default(true)
+  deactivatedAt   DateTime?
+  deactivatedById String?
+  createdById     String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  versions        OfficialFormVersion[]
+  submissions     FormSubmission[]
+
+  @@index([isActive, sortOrder])
+}
+
+/// One edition of the blank PDF of a form, with the fields found in it and what goes into each of them. A new edition is a new version; what was
+/// filled with an older one keeps pointing at it.
+model OfficialFormVersion {
+  id          String           @id @default(cuid())
+  formId      String
+  form        OfficialForm     @relation(fields: [formId], references: [id], onDelete: Cascade)
+  /// 1, 2, 3 … per form.
+  version     Int
+  /// The blank PDF (a StoredFile with purpose `form_blank`).
+  fileId      String           @unique
+  fileName    String
+  pageCount   Int              @default(1)
+  /// The fields found in the PDF when it was uploaded: `[{ name, kind, page, options, maxLength, multiline, readOnly, tooltip }]`.
+  fields      Json             @default("[]")
+  /// What goes into each PDF field: `[{ pdfField, label, source, format, test, choices, required }]` (see official-forms/form-mapping.ts).
+  mapping     Json             @default("[]")
+  /// A made-up example that ships with the system, to be replaced by the official PDF.
+  isSample    Boolean          @default(false)
+  note        String           @default("")
+  createdById String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  submissions FormSubmission[]
+
+  @@unique([formId, version])
+}
+
+/// A form that was filled in for a client: the PDF (filed with the client's documents), who it was for, where it went and what has become of it.
+/// Never deleted — taken out of the log with a reason.
+model FormSubmission {
+  id                 String              @id @default(cuid())
+  formId             String
+  form               OfficialForm        @relation(fields: [formId], references: [id], onDelete: Restrict)
+  versionId          String
+  version            OfficialFormVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  clientId           String
+  client             Client              @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  employeeId         String?
+  employee           Employee?           @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  personId           String?
+  person             Person?             @relation(fields: [personId], references: [id], onDelete: SetNull)
+  periodStart        DateTime?           @db.Date
+  periodEnd          DateTime?           @db.Date
+  /// The filled PDF (a StoredFile; a document of the client).
+  fileId             String              @unique
+  /// Code of the `form_submission_status` list: prepared, sent, done, cancelled.
+  status             String              @default("prepared")
+  preparedOn         DateTime            @db.Date
+  sentOn             DateTime?           @db.Date
+  doneOn             DateTime?           @db.Date
+  /// The day somebody should look at it again ("no answer yet"); a reminder is made then.
+  followUpOn         DateTime?           @db.Date
+  recipientId        String?
+  recipient          AddressBookEntry?   @relation(fields: [recipientId], references: [id], onDelete: SetNull)
+  /// The address as it was on the envelope.
+  recipientText      String              @default("")
+  /// The authority's own reference (a number they answer with).
+  reference          String              @default("")
+  note               String              @default("")
+  /// What was put into the form, without the restricted values (`{ pdfField: value }`).
+  values             Json                @default("{}")
+  /// Restricted values (a BSN) are in the PDF: only people who may see sensitive data open it.
+  hasPersonalData    Boolean             @default(false)
+  /// Some values were read from a photo or scan by the AI (a person confirmed them).
+  usedAi             Boolean             @default(false)
+  isActive           Boolean             @default(true)
+  deactivatedAt      DateTime?
+  deactivatedById    String?
+  deactivationReason String              @default("")
+  createdById        String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  searchText         String              @default("")
+
+  @@index([clientId, isActive])
+  @@index([formId, status])
+  @@index([status, followUpOn])
+  @@index([preparedOn])
+}
+
+// ───────────────────────────── Inspections (control) ─────────────────────────────
+
+/// A checklist: the documents an inspector asks for ("NEN 4400-1 periodic inspection", "Belastingdienst audit"). The checklist itself only holds the name and what
+/// it is the default for; what is on it lives in its versions, so the list of an inspection that took place never changes afterwards. Never deleted — switched off.
+model ChecklistTemplate {
+  id              String             @id @default(cuid())
+  /// Stable slug (`nen4400_1`); the checklists that ship with the system keep theirs.
+  code            String             @unique
+  nameNl          String
+  nameEn          String
+  descriptionNl   String             @default("")
+  descriptionEn   String             @default("")
+  /// Codes of the `inspection_type` list this checklist is the starting point for.
+  inspectionTypes String[]           @default([])
+  sortOrder       Int                @default(0)
+  isActive        Boolean            @default(true)
+  deactivatedAt   DateTime?
+  deactivatedById String?
+  createdById     String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  versions        ChecklistVersion[]
+
+  @@index([isActive, sortOrder])
+}
+
+/// One edition of a checklist (the bureau's list is "version 13"). A draft is edited; a published version is never changed — a change is a new version, and
+/// inspections that were prepared with an older one keep pointing at it.
+model ChecklistVersion {
+  id            String            @id @default(cuid())
+  templateId    String
+  template      ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  /// 1, 2, 3 … per checklist.
+  version       Int
+  /// What the edition is called by whoever issued it ("Cicero versie 13, 4 januari 2023").
+  label         String            @default("")
+  /// `draft` (being edited) or `published` (inspections use it; read-only).
+  status        String            @default("draft")
+  publishedAt   DateTime?
+  publishedById String?
+  note          String            @default("")
+  /// The parts of the list: `[{ key, nameNl, nameEn, folder }]` — `folder` = the part gets a folder in the dated inspection folder.
+  sections      Json              @default("[]")
+  /// The lines of the list, in order (see src/module/inspections/checklist-doc.ts): code, names, the document types that satisfy it, the period rule, the
+  /// maximum age, on-site / digital copy, the condition that decides whether it applies.
+  items         Json              @default("[]")
+  createdById   String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  inspections   Inspection[]
+
+  @@unique([templateId, version])
+  @@index([templateId, status])
+}
+
+/// An inspection of a client by a body (Cicero for NEN 4400-1, the tax authority, the labour inspectorate …): when it is, what it is based on, what has been
+/// found and what has to be done about it. What is ready for it is not stored — it is worked out from the documents (see InspectionItem for what people decided).
+/// Never deleted — switched off.
+model Inspection {
+  id                 String               @id @default(cuid())
+  /// "CTR-0012" — from Settings → Numbering.
+  number             String               @unique
+  clientId           String
+  client             Client               @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  /// Code of the `inspection_type` list.
+  type               String
+  /// Code of the `inspection_body` list: who inspects.
+  body               String
+  /// Code of the `inspection_status` list: planned, in_progress, awaiting_result, closed, cancelled.
+  status             String               @default("planned")
+  /// Code of the `inspection_outcome` list; set when the inspection is closed.
+  outcome            String?
+  inspectorName      String               @default("")
+  /// The body's own reference (a planning or file number they answer with).
+  reference          String               @default("")
+  /// The day of the inspection (or, for a request, the day the answer is due when no visit is planned).
+  date               DateTime             @db.Date
+  /// The period the inspection looks at.
+  periodFrom         DateTime?            @db.Date
+  periodTo           DateTime?            @db.Date
+  /// The day the inspector wants the documents (when they asked before the visit).
+  responseDue        DateTime?            @db.Date
+  /// The edition of the checklist this inspection is prepared with.
+  versionId          String?
+  version            ChecklistVersion?    @relation(fields: [versionId], references: [id], onDelete: SetNull)
+  assigneeId         String?
+  /// What was found, in the office's words.
+  findings           String               @default("")
+  /// The inspector's request (a letter or e-mail), pasted or read from a file.
+  requestText        String               @default("")
+  /// The dated folder in the client's documents (`Controles / Cicero / 21-08-2026`).
+  folderId           String?
+  folder             Folder?              @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  closedOn           DateTime?            @db.Date
+  /// The checklist as it stood when the inspection was closed (documents found, states), so later uploads do not rewrite history.
+  snapshot           Json?
+  isActive           Boolean              @default(true)
+  deactivatedAt      DateTime?
+  deactivatedById    String?
+  deactivationReason String               @default("")
+  createdById        String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  /// Accent-free lower-case text for the quick search (number, client number and name, inspector, reference).
+  searchText         String               @default("")
+  items              InspectionItem[]
+  followUps          InspectionFollowUp[]
+  handovers          InspectionHandover[]
+
+  @@index([clientId, date])
+  @@index([status, date])
+  @@index([isActive, date])
+  @@index([date])
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// What people decided about one line of an inspection's checklist: "not applicable to this client", "done" (it was shown in another way), a note, documents
+/// put on it by hand or taken off it. A line nobody touched has no row — it is worked out from the documents. A line the checklist does not have (something
+/// the inspector asked for in their own words) has no `code`.
+model InspectionItem {
+  id           String               @id @default(cuid())
+  inspectionId String
+  inspection   Inspection           @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  /// The code of a line of the checklist (`2`, `9d`); null for a line added by hand.
+  code         String?
+  /// A line added by hand: what is asked.
+  label        String               @default("")
+  /// `not_applicable` or `done`; null = worked out from the documents.
+  decision     String?
+  note         String               @default("")
+  /// The day this line is due (an inspector's own deadline).
+  dueDate      DateTime?            @db.Date
+  sortOrder    Int                  @default(0)
+  updatedById  String?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  files        InspectionItemFile[]
+
+  @@unique([inspectionId, code])
+  @@index([inspectionId])
+}
+
+/// A document put on a line by hand (`added`), or one the system matched that does not belong on it (`excluded`).
+model InspectionItemFile {
+  id          String         @id @default(cuid())
+  itemId      String
+  item        InspectionItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  fileId      String
+  file        StoredFile     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  /// `added` or `excluded`.
+  kind        String
+  createdById String?
+  createdAt   DateTime       @default(now())
+
+  @@unique([itemId, fileId])
+  @@index([fileId])
+}
+
+/// Something that has to be done because of an inspection (a finding to put right, a document to bring later).
+model InspectionFollowUp {
+  id           String     @id @default(cuid())
+  inspectionId String
+  inspection   Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  text         String
+  dueDate      DateTime?  @db.Date
+  doneOn       DateTime?  @db.Date
+  assigneeId   String?
+  createdById  String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([inspectionId])
+  @@index([doneOn, dueDate])
+}
+
+/// What was handed over to an inspector: when, to whom, how and which documents (a list of what was in it, names and ids, so it can be shown again).
+model InspectionHandover {
+  id           String     @id @default(cuid())
+  inspectionId String
+  inspection   Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  at           DateTime   @default(now())
+  /// Code of the `inspection_handover_method` list: zip, pdf, checklist, on_site, email, other.
+  method       String
+  toName       String     @default("")
+  note         String     @default("")
+  /// `{ items: [{ code, label, files: [{ id, name }] }], files: n }` — what was in it.
+  manifest     Json       @default("{}")
+  /// Documents that seemed to hold a citizen service number were in it, and the person who made the bundle chose to hand them over anyway.
+  bsnAccepted  Boolean    @default(false)
+  createdById  String?
+  createdAt    DateTime   @default(now())
+
+  @@index([inspectionId, at])
+}
+
+// ───────────────────────────── Taxes ─────────────────────────────
+
+/// One step of the VAT tracker — a column of the office's own quarter sheet ("Factuur: ontvangen", "Fiscaal: sturen" …). The steps are edited in Settings → Taxes; a period remembers
+/// what was ticked by the step's code, so renaming or reordering a step changes nothing in the history. Never deleted — switched off.
+model VatStep {
+  id              String    @id @default(cuid())
+  /// Stable slug (`invoices_received`); the steps that ship with the system keep theirs.
+  code            String    @unique
+  nameNl          String
+  nameEn          String
+  /// The heading over neighbouring steps ("Factuur" over "ontvangen" and "boeken"); empty = no heading.
+  groupNl         String    @default("")
+  groupEn         String    @default("")
+  /// The step that means "the return has been filed": the day it is ticked is the day of filing, and the deadline reminder stops.
+  isFiling        Boolean   @default(false)
+  sortOrder       Int       @default(0)
+  isActive        Boolean   @default(true)
+  deactivatedAt   DateTime?
+  deactivatedById String?
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([isActive, sortOrder])
+}
+
+/// One VAT return of one client: a quarter (or a month, or a year — what the client's VAT frequency says) with the steps ticked so far. The rows of a period are made by the
+/// system for every active client with a VAT duty. Never deleted — switched off with a reason (a client that did not need a return that quarter).
+model VatPeriod {
+  id                 String    @id @default(cuid())
+  clientId           String
+  client             Client    @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  /// `quarter`, `month` or `year` (codes of the `vat_frequency` list).
+  kind               String
+  periodStart        DateTime  @db.Date
+  periodEnd          DateTime  @db.Date
+  /// What was ticked: `{ [stepCode]: { at: ISO time, by: userId } }`.
+  ticks              Json      @default("{}")
+  /// Set when every step was ticked; cleared when somebody takes a tick away. A period that was complete stays complete when a step is added afterwards.
+  completedAt        DateTime?
+  note               String    @default("")
+  isActive           Boolean   @default(true)
+  deactivatedAt      DateTime?
+  deactivatedById    String?
+  deactivationReason String    @default("")
+  createdById        String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([clientId, kind, periodStart])
+  @@index([kind, periodStart, isActive])
+  @@index([periodEnd, completedAt])
+}
+
+/// A yearly return of a client: income tax (IB) of an owner or a partner, or corporate income tax (VPB) of the company — where it stands, when it was filed, the filed return and
+/// an extension that was asked for. Never deleted — switched off with a reason.
+model TaxReturn {
+  id                    String    @id @default(cuid())
+  /// `income_tax` or `corporate_tax`.
+  kind                  String
+  clientId              String
+  client                Client    @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  /// Income tax: the owner or partner the return is for. Corporate tax: null.
+  personId              String?
+  person                Person?   @relation(fields: [personId], references: [id], onDelete: Restrict)
+  /// The year the return is about (a financial year is named after the year it starts in).
+  taxYear               Int
+  periodStart           DateTime  @db.Date
+  periodEnd             DateTime  @db.Date
+  /// Code of the `tax_return_status` list.
+  status                String    @default("not_started")
+  assigneeId            String?
+  /// The day the return was filed.
+  filedOn               DateTime? @db.Date
+  /// The filed return: a document of the client (a StoredFile).
+  fileId                String?
+  /// An extension: asked for (`requested`), then `granted` or `refused` (code of the `tax_extension_status` list); null = none asked.
+  extensionStatus       String?
+  extensionRequestedOn  DateTime? @db.Date
+  /// The deadline that was asked for or granted.
+  extensionUntil        DateTime? @db.Date
+  /// The form that asked for it (Aanvraag uitstel), when it was made in the system (a FormSubmission).
+  extensionSubmissionId String?
+  note                  String    @default("")
+  isActive              Boolean   @default(true)
+  deactivatedAt         DateTime?
+  deactivatedById       String?
+  deactivationReason    String    @default("")
+  createdById           String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([kind, clientId, personId, taxYear])
+  @@index([kind, taxYear, status])
+  @@index([clientId, kind])
+  @@index([isActive, status])
+}
+
+// ───────────────────────────── Tasks, calendar, reports ─────────────────────────────
+
+/// A to-do for a member of staff, optionally about one record (a client, a worker, a contract, an invoice, an inspection or a document). Never deleted — taking one away switches it
+/// off, and it can be brought back.
+model Task {
+  id              String    @id @default(cuid())
+  title           String
+  description     String    @default("")
+  /// Code of the `task_status` list: todo, in_progress, waiting, done.
+  status          String    @default("todo")
+  /// Code of the `task_priority` list: low, medium, high, urgent.
+  priority        String    @default("medium")
+  dueDate         DateTime? @db.Date
+  assigneeId      String?
+  /// What the task is about: the kind of record (`client`, `employee`, `contract`, `invoice`, `inspection`, `file`) and its id; `linkedLabel` is how it was called when the task was saved.
+  linkedType      String?
+  linkedId        String?
+  linkedLabel     String    @default("")
+  /// The client behind the linked record (or the linked client itself): "all tasks of this client" is one query.
+  clientId        String?
+  client          Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  tags            String[]  @default([])
+  /// A short checklist: `[{ id, title, done }]`.
+  subtasks        Json      @default("[]")
+  /// The moment it became done; cleared when it is reopened.
+  completedAt     DateTime?
+  /// Accent-free lower-case text for the quick search (title, description, tags, the linked record).
+  searchText      String    @default("")
+  isActive        Boolean   @default(true)
+  deactivatedAt   DateTime?
+  deactivatedById String?
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([assigneeId, status, dueDate])
+  @@index([clientId])
+  @@index([linkedType, linkedId])
+  @@index([isActive, status, dueDate])
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// An appointment on the office calendar: a meeting, a team event or a reminder to oneself. Dates that come from other records (contract ends, deadlines, tasks, inspections, holidays)
+/// are worked out when the calendar is read — they are not stored here. Times are the wall-clock time in the Netherlands. Never deleted — cancelling one switches it off.
+model CalendarEvent {
+  id              String    @id @default(cuid())
+  title           String
+  /// `meeting`, `team` or `reminder`.
+  type            String    @default("meeting")
+  allDay          Boolean   @default(false)
+  /// The first and the last day (inclusive); an event that has a time stays on one day unless it runs past midnight.
+  startsOn        DateTime  @db.Date
+  endsOn          DateTime  @db.Date
+  /// `HH:mm`, for events that are not all day.
+  startTime       String?
+  endTime         String?
+  location        String    @default("")
+  description     String    @default("")
+  meetingLink     String    @default("")
+  /// The guests: `[{ name, email, userId? }]` — colleagues are told in the app, the others are only listed.
+  attendees       Json      @default("[]")
+  clientId        String?
+  client          Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  /// Minutes before the start that the organiser and the colleagues on the list are reminded; null = no reminder.
+  reminderMinutes Int?
+  reminderSentAt  DateTime?
+  isActive        Boolean   @default(true)
+  deactivatedAt   DateTime?
+  deactivatedById String?
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([startsOn, endsOn, isActive])
+  @@index([clientId])
+  @@index([reminderMinutes, reminderSentAt, startsOn])
+}
+
+/// A saved way of exporting a report: which report, the choices made on its screen (period, filters), the columns to keep and the file format. Shared by the whole office.
+model ExportPreset {
+  id          String   @id @default(cuid())
+  name        String
+  /// The report it is for (`contract-expiries`, `salary-statements` …).
+  reportKey   String
+  /// `xlsx`, `pdf` or `docx`.
+  format      String   @default("xlsx")
+  /// `none`, `this_month`, `last_month`, `this_quarter`, `last_quarter`, `this_year`, `last_year`, or `custom` (the dates are in `params`). A relative period moves with the calendar.
+  period      String   @default("none")
+  /// The other choices of the report (client, status …), by parameter key.
+  params      Json     @default("{}")
+  /// The columns to keep (their ids); empty = all of them.
+  columns     String[] @default([])
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([reportKey])
 }

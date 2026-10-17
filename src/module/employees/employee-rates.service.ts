@@ -17,16 +17,30 @@ export interface RateRow {
   current: boolean;
 }
 
+/** Heard after every change of a worker's rate history, inside the transaction that made it: `from` is the first day the change can affect. */
+type RateListener = (tx: Prisma.TransactionClient, employeeId: string, from: string) => Promise<unknown>;
+
 /**
  * The hourly rate of a worker over time. A change adds a row that starts on its day; the past is never overwritten, so the hours, salary
  * statements and invoices of an earlier month keep the rate that was true then. "Today's rate" is the latest row that has started.
  */
 @Injectable()
 export class EmployeeRatesService {
+  private readonly listeners: RateListener[] = [];
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
   ) {}
+
+  /** Other modules (the hours: days entered before a rate was known get priced) hear about every change of the history. */
+  onChanged(listener: RateListener): void {
+    this.listeners.push(listener);
+  }
+
+  private async changed(tx: Prisma.TransactionClient, employeeId: string, from: string): Promise<void> {
+    for (const listener of this.listeners) await listener(tx, employeeId, from);
+  }
 
   /** Today's rate of each of these workers (workers without a rate are left out). */
   async currentRates(employeeIds: string[]): Promise<Map<string, number>> {
@@ -58,6 +72,7 @@ export class EmployeeRatesService {
       create: { employeeId, rate, validFrom: day, note, createdById: userId },
       update: { rate, note, createdById: userId },
     });
+    await this.changed(tx, employeeId, validFrom);
   }
 
   /** "New hourly rate from …" on the worker's page: also for a past or future day. */
@@ -84,7 +99,10 @@ export class EmployeeRatesService {
     const row = await this.prisma.rateHistory.findFirst({ where: { id: rateId, employeeId } });
     if (!row) throw new NotFoundException({ code: 'not_found', message: 'Rate not found' });
     const before = await this.current(employeeId);
-    await this.prisma.rateHistory.delete({ where: { id: rateId } });
+    await this.prisma.$transaction(async tx => {
+      await tx.rateHistory.delete({ where: { id: rateId } });
+      await this.changed(tx, employeeId, formatDay(row.validFrom));
+    });
     await this.audit.log({
       action: 'updated',
       entityType: 'employee',

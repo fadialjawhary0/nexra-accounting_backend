@@ -28,9 +28,15 @@ export const OFFICE_DEFINITIONS = {
 
 export const DOCUMENTS_NAMESPACE = 'documents';
 
-/** How documents are watched: the lead time of "expires soon" (ID cards, residence permits, certificates). Phase 12 adds the rest (types, valid-until rules). */
+/**
+ * How documents are watched and filed: the lead time of "expires soon" (ID cards, residence permits, certificates — a type can have its own), whether an
+ * uploaded file is named by the pattern of its type, and whether the text of documents is read so they can be found by what they say. The types, the
+ * folder template and the required documents are records of their own (Settings → Documents).
+ */
 export const DOCUMENTS_DEFINITIONS = {
   expiryWarningDays: { type: 'int', default: 90, min: 7, max: 365, group: 'expiry' },
+  autoName: { type: 'bool', default: true, group: 'filing' },
+  indexText: { type: 'bool', default: true, group: 'search' },
 } satisfies SettingDefinitions;
 
 export const LOCALE_NAMESPACE = 'locale';

@@ -49,6 +49,16 @@ export class AppConfigService {
     return path.resolve(this.config.get('STORAGE_DIR', { infer: true }));
   }
 
+  /** Where the `soffice` program of LibreOffice is, when the person who installed the server said so (otherwise `undefined`: look in the usual places). */
+  get libreOfficePath(): string | undefined {
+    return this.config.get('LIBREOFFICE_PATH', { infer: true });
+  }
+
+  /** The AI provider's key (and an optional other address for it), or `null` key when nothing is set up. */
+  get openai(): { apiKey: string | null; baseUrl: string | undefined } {
+    return { apiKey: this.config.get('OPENAI_API_KEY', { infer: true }) ?? null, baseUrl: this.config.get('OPENAI_BASE_URL', { infer: true }) };
+  }
+
   /** SMTP settings, or `null` when no server is configured (development: mails go to the log). */
   get smtp() {
     const host = this.config.get('SMTP_HOST', { infer: true });

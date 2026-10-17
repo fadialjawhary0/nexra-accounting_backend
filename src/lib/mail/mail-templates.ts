@@ -54,3 +54,17 @@ export function resetMail(locale: MailLocale, input: { name: string; link: strin
     html: layout('Wachtwoord opnieuw instellen', lines, { label: 'Nieuw wachtwoord kiezen', link: input.link }, `Deze link is ${input.minutes} minuten geldig en werkt maar één keer. Heb je dit niet aangevraagd? Negeer deze e-mail dan — je wachtwoord blijft hetzelfde.`),
   };
 }
+
+/** What is new for a person: reminders and warnings of the system, one mail with everything (not one per item). */
+export function digestMail(locale: MailLocale, input: { name: string; items: Array<{ title: string; body: string; link?: string }>; link: string }): RenderedMail {
+  const nl = locale === 'nl';
+  const count = input.items.length;
+  const heading = nl ? (count === 1 ? 'Er is 1 herinnering voor je' : `Er zijn ${count} herinneringen voor je`) : count === 1 ? 'You have 1 reminder' : `You have ${count} reminders`;
+  const lines = [nl ? `Hallo ${input.name},` : `Hi ${input.name},`, ...input.items.map(item => (item.body ? `${item.title} — ${item.body}` : item.title))];
+  const footer = nl ? 'Je krijgt deze e-mail omdat een herinnering voor jou is ingesteld. Je kunt dat per soort melding aanpassen onder Instellingen → Meldingen.' : 'You get this e-mail because a reminder is set up for you. You can change that per type of notification under Settings → Notifications.';
+  return {
+    subject: heading,
+    text: `${lines.join('\n\n')}\n\n${input.link}`,
+    html: layout(heading, lines, { label: nl ? 'Open Nexra' : 'Open Nexra', link: input.link }, footer),
+  };
+}

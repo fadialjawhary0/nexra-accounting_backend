@@ -21,6 +21,18 @@ export const EMPLOYEE_DATE_COLUMNS: ReadonlySet<string> = new Set(['startDate', 
 /** The form field that shows today's hourly rate; saving a different value adds a row to the rate history. */
 export const RATE_FIELD = 'hourly_rate';
 
+/** How a worker is used: only for the client (`own`), hired out to a hirer who is invoiced for the hours, or hired in through a staffing company (the client gets its invoice). */
+export type WorkKind = 'own' | 'hired_out' | 'hired_in';
+export const WORK_KINDS: readonly WorkKind[] = ['own', 'hired_out', 'hired_in'];
+
+/** The employee-form field that holds the kind (a pick-list `work_kind`); a worker without a value is an own employee. */
+export const WORK_KIND_FIELD = 'work_kind';
+
+export function workKindOf(data: unknown): WorkKind {
+  const value = data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>)[WORK_KIND_FIELD] : undefined;
+  return value === 'hired_out' || value === 'hired_in' ? value : 'own';
+}
+
 /** The sub-folder of a client's contracts folder where the folders of workers who left are kept (Ahmad's own `0-GESTOPT`). */
 export const STOPPED_FOLDER_NAME = '0-GESTOPT';
 

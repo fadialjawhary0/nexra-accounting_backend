@@ -110,12 +110,4 @@ export class EmployeesController {
     await this.employees.assertRateAccess(user, 'edit');
     return this.rates.remove(id, rateId, user);
   }
-
-  /* ── Documents ────────────────────────────────────────────────────────────────────────────────────────────────── */
-
-  /** The worker's folder and files (upload with `POST /files`: `purpose=attachment`, `area=employees`, `entityType=employee`, `entityId`, `folderId`). */
-  @Get(':id/documents')
-  documents(@Param('id') id: string) {
-    return this.employees.documents(id);
-  }
 }

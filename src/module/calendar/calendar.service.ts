@@ -211,26 +211,35 @@ export class CalendarService implements OnModuleInit {
     return rows.map(row => serializeHoliday(row, options.locale));
   }
 
-  async create(input: { date: string; nameNl: string; nameEn: string; paid?: boolean }, locale: AppLocale) {
+  /** A day off of one client only has to point at a client that exists. */
+  private async assertClient(clientId: string | null | undefined): Promise<void> {
+    if (clientId && !(await this.prisma.client.findUnique({ where: { id: clientId }, select: { id: true } }))) throw this.invalid({ clientId: 'validation.invalid' });
+  }
+
+  async create(input: { date: string; nameNl: string; nameEn: string; paid?: boolean; clientId?: string | null }, locale: AppLocale) {
     if (!isValidDay(input.date)) throw this.invalid({ date: 'validation.invalidDate' });
+    await this.assertClient(input.clientId);
     const holiday = await this.prisma.holiday.create({
-      data: { date: parseDay(input.date), nameNl: input.nameNl.trim(), nameEn: input.nameEn.trim(), kind: 'custom', isPaid: input.paid ?? false },
+      data: { date: parseDay(input.date), nameNl: input.nameNl.trim(), nameEn: input.nameEn.trim(), kind: 'custom', isPaid: input.paid ?? false, clientId: input.clientId || null },
     });
     await this.reload();
-    await this.audit.log({ action: 'created', entityType: 'holiday', entityId: holiday.id, entityLabel: `${input.date} ${holiday.nameEn}`, after: { date: input.date, nameNl: holiday.nameNl, nameEn: holiday.nameEn } });
+    await this.audit.log({ action: 'created', entityType: 'holiday', entityId: holiday.id, entityLabel: `${input.date} ${holiday.nameEn}`, after: { date: input.date, nameNl: holiday.nameNl, nameEn: holiday.nameEn, clientId: holiday.clientId } });
     return serializeHoliday(holiday, locale);
   }
 
-  async update(id: string, changes: { date?: string; nameNl?: string; nameEn?: string; paid?: boolean; active?: boolean }, locale: AppLocale) {
+  async update(id: string, changes: { date?: string; nameNl?: string; nameEn?: string; paid?: boolean; active?: boolean; clientId?: string | null }, locale: AppLocale) {
     const holiday = await this.prisma.holiday.findUnique({ where: { id } });
     if (!holiday) throw new NotFoundException({ code: 'not_found', message: 'Holiday not found' });
     if (changes.date !== undefined) {
       if (holiday.kind === 'official') throw new ConflictException({ code: 'official_holiday', message: 'The date of an official holiday follows the calendar and cannot be changed.' });
       if (!isValidDay(changes.date)) throw this.invalid({ date: 'validation.invalidDate' });
     }
+    if (changes.clientId !== undefined && holiday.kind === 'official') throw new ConflictException({ code: 'official_holiday', message: 'An official holiday counts for every client.' });
+    await this.assertClient(changes.clientId);
     const updated = await this.prisma.holiday.update({
       where: { id },
       data: {
+        ...(changes.clientId !== undefined && { clientId: changes.clientId || null }),
         ...(changes.date !== undefined && { date: parseDay(changes.date) }),
         ...(changes.nameNl !== undefined && { nameNl: changes.nameNl.trim() }),
         ...(changes.nameEn !== undefined && { nameEn: changes.nameEn.trim() }),
@@ -239,7 +248,7 @@ export class CalendarService implements OnModuleInit {
       },
     });
     await this.reload();
-    const pick = (row: Holiday) => ({ date: formatDay(row.date), nameNl: row.nameNl, nameEn: row.nameEn, paid: row.isPaid, active: row.isActive });
+    const pick = (row: Holiday) => ({ date: formatDay(row.date), nameNl: row.nameNl, nameEn: row.nameEn, paid: row.isPaid, active: row.isActive, clientId: row.clientId });
     const diff = AuditService.changes(pick(holiday), pick(updated));
     if (Object.keys(diff.after).length) {
       const action = changes.active !== undefined && changes.active !== holiday.isActive ? (changes.active ? 'activated' : 'deactivated') : 'updated';

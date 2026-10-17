@@ -58,6 +58,8 @@ export interface FieldValidation {
   max?: number;
   minLength?: number;
   maxLength?: number;
+  /** A date field: no day after today (a date of birth). */
+  notFuture?: boolean;
 }
 
 export type FieldWidth = 'full' | 'half' | 'third';

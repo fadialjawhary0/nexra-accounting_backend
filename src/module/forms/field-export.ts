@@ -18,7 +18,7 @@ export const exportType = (field: FieldDef): ExportColumn['type'] => {
   }
 };
 
-export const exportWidth = (field: FieldDef): number => (field.type === 'textarea' ? 40 : field.type === 'boolean' || field.type === 'date' ? 12 : field.type === 'select' || field.type === 'multiselect' ? 18 : 22);
+export const exportWidth = (field: FieldDef): number => (field.type === 'textarea' ? 40 : field.type === 'boolean' ? 12 : field.type === 'date' ? 14 : field.type === 'select' || field.type === 'multiselect' ? 18 : 22);
 
 /** The name of a choice in the field's pick-list (or its own choices); the code itself when it is not known any more. */
 const choiceName = (field: FieldDef, code: string, names: Map<string, Map<string, string>>, locale: AppLocale): string =>

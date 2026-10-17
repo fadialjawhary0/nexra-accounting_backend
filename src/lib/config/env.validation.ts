@@ -46,6 +46,9 @@ export class EnvironmentVariables {
   /** Folder for uploaded files (local disk driver). */
   @IsString() @MinLength(1) STORAGE_DIR: string = './storage';
 
+  /** LibreOffice's `soffice` program, which turns Word files into PDF. Left empty, the usual install folders (and `soffice` on the PATH) are tried. */
+  @IsOptional() @Transform(emptyToUndefined) @IsString() LIBREOFFICE_PATH?: string;
+
   /** Leave SMTP_HOST empty in development: mails are written to the log instead of being sent. */
   @IsOptional() @Transform(emptyToUndefined) @IsString() SMTP_HOST?: string;
   @Type(() => Number) @IsInt() @Min(1) @Max(65535) SMTP_PORT: number = 587;
@@ -53,6 +56,11 @@ export class EnvironmentVariables {
   @IsOptional() @Transform(emptyToUndefined) @IsString() SMTP_USER?: string;
   @IsOptional() @Transform(emptyToUndefined) @IsString() SMTP_PASS?: string;
   @IsString() MAIL_FROM: string = 'Nexra B.V. <no-reply@nexrabv.nl>';
+
+  /** The OpenAI key that reads photos and PDFs (Phase 11). Left empty, every AI feature says "not set up" and the rest of the app works as before. Never leaves the server. */
+  @IsOptional() @Transform(emptyToUndefined) @IsString() OPENAI_API_KEY?: string;
+  /** Only to send the AI calls through a proxy or a stand-in server; leave it out to use OpenAI itself. */
+  @IsOptional() @Transform(emptyToUndefined) @IsUrl({ require_tld: false }) OPENAI_BASE_URL?: string;
 
   /** 32 random bytes, base64 — encrypts 2FA secrets and restricted personal data. Generate: openssl rand -base64 32 */
   @Matches(/^[A-Za-z0-9+/]{43}=$/, { message: 'ENCRYPTION_KEY must be 32 random bytes in base64 (44 characters)' }) ENCRYPTION_KEY!: string;

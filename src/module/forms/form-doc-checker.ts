@@ -202,7 +202,7 @@ function checkChoices(input: unknown, place: string, problems: Problems): FieldC
 function checkValidation(input: unknown, type: FieldType, place: string, problems: Problems): FieldValidation {
   const raw = isRecord(input) ? input : {};
   const result: FieldValidation = {};
-  const number = (name: keyof FieldValidation, allowed: boolean, integer = false) => {
+  const number = (name: 'min' | 'max' | 'minLength' | 'maxLength', allowed: boolean, integer = false) => {
     const value = raw[name];
     if (value === undefined || value === null || value === '') return;
     if (!allowed) return;
@@ -218,6 +218,8 @@ function checkValidation(input: unknown, type: FieldType, place: string, problem
   number('max', numeric);
   number('minLength', texty, true);
   number('maxLength', texty, true);
+  // A date of birth (or any date that cannot lie ahead): no day after today.
+  if (type === 'date' && raw.notFuture === true) result.notFuture = true;
   if (result.min !== undefined && result.max !== undefined && result.min > result.max) problems[`${place}.validation`] = 'validation.invalid';
   if (result.minLength !== undefined && result.maxLength !== undefined && result.minLength > result.maxLength) problems[`${place}.validation`] = 'validation.invalid';
   return result;

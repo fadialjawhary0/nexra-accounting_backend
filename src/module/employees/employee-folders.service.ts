@@ -42,6 +42,8 @@ export class EmployeeFoldersService {
       where: { id: folder.id },
       data: { clientId: employee.clientId, parentId: parent.id, name: await this.freeName(tx, employee.clientId, parent.id, folder.name, folder.id) },
     });
+    // The worker's documents move with the worker: they belong to the new employer now.
+    await tx.storedFile.updateMany({ where: { OR: [{ folderId: folder.id }, { entityType: 'employee', entityId: employee.id }] }, data: { clientId: employee.clientId } });
   }
 
   /** The folder follows the person's name. */

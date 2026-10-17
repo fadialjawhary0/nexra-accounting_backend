@@ -32,6 +32,7 @@ export interface PermissionArea {
 export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
   { key: 'workspace', names: { nl: 'Werkruimte', en: 'Workspace' } },
   { key: 'clients', names: { nl: 'Klanten', en: 'Clients' } },
+  { key: 'money', names: { nl: 'Uren & loon', en: 'Hours & pay' } },
   { key: 'taxes', names: { nl: 'Belastingen', en: 'Taxes' } },
   { key: 'google', names: { nl: 'Google Workspace', en: 'Google Workspace' } },
   { key: 'automation', names: { nl: 'Automatisering', en: 'Automation' } },
@@ -44,17 +45,32 @@ const ALL = ['view', 'create', 'edit', 'delete', 'export', 'approve'] as const;
 
 export const PERMISSION_AREAS: readonly PermissionArea[] = [
   { key: 'dashboard', group: 'workspace', actions: ['view'], names: { nl: 'Dashboard', en: 'Dashboard' } },
-  { key: 'tasks', group: 'workspace', actions: CRUD, names: { nl: 'Taken', en: 'Tasks' } },
+  { key: 'tasks', group: 'workspace', actions: CRUD_EXPORT, names: { nl: 'Taken', en: 'Tasks' } },
   { key: 'notifications', group: 'workspace', actions: ['view'], names: { nl: 'Meldingen', en: 'Notifications' } },
+  /** The office calendar: appointments people make and the dates worked out from contracts, tasks, taxes and inspections. `create` = add an appointment, `edit` = change one, `delete` = cancel one. */
+  { key: 'calendar', group: 'workspace', actions: CRUD, names: { nl: 'Agenda', en: 'Calendar' } },
   { key: 'clients', group: 'clients', actions: CRUD_EXPORT, names: { nl: 'Klanten', en: 'Clients' } },
   { key: 'employees', group: 'clients', actions: CRUD_EXPORT, names: { nl: 'Werknemers', en: 'Employees' } },
   { key: 'contracts', group: 'clients', actions: ALL, names: { nl: 'Contracten', en: 'Contracts' } },
-  { key: 'tax_forms', group: 'taxes', actions: ALL, names: { nl: 'Aangiften', en: 'Tax forms' } },
-  { key: 'tax_inspections', group: 'taxes', actions: CRUD_EXPORT, names: { nl: 'Controles', en: 'Inspections' } },
+  /** The Documents page. What a person sees of each document follows the area of the file (clients, employees, contracts, invoices …) — this is the right to open the page and work with documents. `create` = add documents, `edit` = change them, add versions and links, `delete` = remove and bring back, `export` = download lists. */
+  { key: 'documents', group: 'clients', actions: CRUD_EXPORT, names: { nl: 'Documenten', en: 'Documents' } },
+  { key: 'templates', group: 'automation', actions: CRUD, names: { nl: 'Sjablonen', en: 'Templates' } },
+  /** Bulk imports: spreadsheets and the AI file queue. `create` = start an import, `edit` = change values in the review list and the saved column mappings, `delete` = cancel an import / remove a mapping, `approve` = save the results into the records (this also needs the right to create or change those records), `export` = download the report. */
+  { key: 'imports', group: 'automation', actions: ALL, names: { nl: 'Importeren', en: 'Imports' } },
+  /** Registering hours (the week grid). `approve` = close or reopen a period and change days that are closed (with a reason). */
+  { key: 'hours', group: 'money', actions: ALL, names: { nl: 'Uren', en: 'Hours' } },
+  /** What is paid: salary statements show amounts. `delete` = cancel a statement. */
+  { key: 'salary_statements', group: 'money', actions: ['view', 'create', 'delete', 'export'], names: { nl: 'Loonstaten', en: 'Salary statements' } },
+  /** Invoices about hours (incoming from staffing companies, outgoing to the companies that used the workers), their companies, the reconciliation and the markup report. `approve` = issue an invoice / mark an incoming one as checked; `delete` = cancel or credit. */
+  { key: 'invoices', group: 'money', actions: ALL, names: { nl: 'Facturen', en: 'Invoices' } },
+  /** The library of official PDF forms (Melding loonheffingen, G-account forms …), filling them in, the log of sent forms and the address book for envelope labels. `create` = fill a form in, file it and make its label, mark it sent or dealt with; `edit` = change the library (upload a new edition, the mapping) and the address book; `delete` = switch a form or an address off, take an entry out of the log; `export` = download lists. */
+  { key: 'official_forms', group: 'taxes', actions: CRUD_EXPORT, names: { nl: 'Formulieren en post', en: 'Official forms and post' } },
+  /** The VAT tracker, the yearly income-tax and corporate-tax returns and the employer registrations. `create` = make the rows of a period or a return by hand, `edit` = tick steps, change a return (status, extension, filed return) and the notes, `delete` = switch a row off or on, `export` = download the lists. The VAT steps themselves are edited in Settings. */
+  { key: 'taxes', group: 'taxes', actions: CRUD_EXPORT, names: { nl: 'Belastingaangiften', en: 'Tax returns' } },
+  /** Inspections (NEN 4400-1, the tax authority …): planning one, the checklist and what is ready for it, the folder, handing documents over and the follow-up. `create` = plan an inspection, `edit` = change it (lines of the checklist, notes, status, follow-up, hand-overs), `delete` = switch an inspection off or on, `export` = the checklist, the lists and the bundle for the inspector. The checklists themselves are edited in Settings. */
+  { key: 'inspections', group: 'taxes', actions: CRUD_EXPORT, names: { nl: 'Controles', en: 'Inspections' } },
   { key: 'drive', group: 'google', actions: CRUD, names: { nl: 'Google Drive', en: 'Google Drive' } },
-  { key: 'calendar', group: 'google', actions: CRUD, names: { nl: 'Agenda', en: 'Calendar' } },
   { key: 'mail', group: 'google', actions: CRUD, names: { nl: 'Gmail', en: 'Gmail' } },
-  { key: 'invoice_ocr', group: 'automation', actions: ALL, names: { nl: 'Facturen inlezen', en: 'Invoice OCR' } },
   { key: 'reports', group: 'automation', actions: ['view', 'export'], names: { nl: 'Rapporten', en: 'Reports' } },
   { key: 'activity', group: 'admin', actions: ['view', 'export'], names: { nl: 'Activiteitenlogboek', en: 'Activity log' } },
   { key: 'users', group: 'admin', actions: CRUD_EXPORT, names: { nl: 'Gebruikers & rollen', en: 'Users & roles' } },
@@ -160,8 +176,12 @@ export const MEDEWERKER_PERMISSIONS: PermissionMatrix = sanitizeMatrix({
   clients: ['view'],
   employees: ['view'],
   contracts: ['view'],
-  tax_forms: ['view'],
-  tax_inspections: ['view'],
+  documents: ['view'],
+  hours: ['view', 'create', 'edit'],
+  invoices: ['view'],
+  official_forms: ['view', 'create'],
+  taxes: ['view', 'edit'],
+  inspections: ['view'],
   calendar: ['view', 'create', 'edit'],
   reports: ['view'],
 });

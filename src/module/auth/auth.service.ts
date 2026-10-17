@@ -160,6 +160,7 @@ export class AuthService {
     const problem = this.passwords.problem(dto.next, { email: user.email });
     if (problem) fields.next = problem;
     else if (dto.next === dto.current) fields.next = 'validation.passwordSame';
+    else if (await this.passwords.reused(user.id, dto.next, user.passwordHash)) fields.next = 'validation.passwordReused';
     if (dto.confirm !== undefined && dto.confirm !== dto.next) fields.confirm = 'validation.passwordMismatch';
     if (Object.keys(fields).length) throw validationFailed(fields);
 
@@ -167,6 +168,7 @@ export class AuthService {
       where: { id: user.id },
       data: { passwordHash: await this.passwords.hash(dto.next), passwordChangedAt: new Date(), mustChangePassword: false },
     });
+    await this.passwords.remember(user.id, user.passwordHash);
     const ended = await this.tokens.revokeAllForUser(user.id, 'password_changed', principal.sessionId);
     await this.audit.log({ action: 'password_changed', entityType: 'user', entityId: user.id, entityLabel: user.name, meta: { otherSessionsEnded: ended } });
     return { ok: true, passwordChangedAt: updated.passwordChangedAt };
@@ -223,10 +225,12 @@ export class AuthService {
     const fields: Record<string, string> = {};
     const problem = this.passwords.problem(dto.password, { email: record.user.email });
     if (problem) fields.password = problem;
+    else if (await this.passwords.reused(record.userId, dto.password, record.user.passwordHash)) fields.password = 'validation.passwordReused';
     if (dto.confirm !== undefined && dto.confirm !== dto.password) fields.confirm = 'validation.passwordMismatch';
     if (Object.keys(fields).length) throw validationFailed(fields);
 
     if (!(await this.accountTokens.consume(record.id))) throw this.invalidLink();
+    await this.passwords.remember(record.userId, record.user.passwordHash);
     return this.prisma.user.update({
       where: { id: record.userId },
       data: { passwordHash: await this.passwords.hash(dto.password), passwordChangedAt: new Date(), mustChangePassword: false, status: 'active', disabledAt: null },

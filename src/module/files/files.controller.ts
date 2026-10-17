@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import type { Response } from 'express';
+import { contentDisposition } from '../../common/content-disposition.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.js';
 import { FileUploadInterceptor } from './file-upload.interceptor.js';
@@ -26,13 +27,6 @@ class DownloadQuery {
   /** Show it in the browser (only PDFs and images ever are); otherwise it is downloaded. */
   @IsOptional() @IsString() inline?: string;
 }
-
-/** `attachment; filename="plain.pdf"; filename*=UTF-8''percent%20encoded.pdf` — safe for every name. */
-const disposition = (kind: 'inline' | 'attachment', name: string): string => {
-  const plain = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
-  const encoded = encodeURIComponent(name).replace(/['()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
-  return `${kind}; filename="${plain}"; filename*=UTF-8''${encoded}`;
-};
 
 /**
  * Upload and open files. What is allowed to be uploaded and who may open a file is decided in FilesService; any signed-in person
@@ -66,7 +60,7 @@ export class FilesController {
     // Nothing a file contains may ever run in the app's origin: no sniffing, no scripts. (The browser's PDF viewer does not work inside a CSP sandbox.)
     const policy = file.mimeType === 'application/pdf' ? "frame-ancestors 'self'" : "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox";
     response.set({ 'Cache-Control': 'private, max-age=300', 'Content-Security-Policy': policy, 'X-Content-Type-Options': 'nosniff' });
-    return new StreamableFile(stream, { type: file.mimeType, disposition: disposition(inline ? 'inline' : 'attachment', file.name), length: file.size });
+    return new StreamableFile(stream, { type: file.mimeType, disposition: contentDisposition(inline ? 'inline' : 'attachment', file.name), length: file.size });
   }
 
   @Delete(':id')

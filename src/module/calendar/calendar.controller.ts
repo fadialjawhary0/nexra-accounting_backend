@@ -22,6 +22,8 @@ class CreateHolidayDto {
   @IsString() @IsNotEmpty() @MaxLength(80) nameNl!: string;
   @IsString() @IsNotEmpty() @MaxLength(80) nameEn!: string;
   @IsOptional() @IsBoolean() paid?: boolean;
+  /** A day off of one client only (what its collective agreement says); without one the day counts for everybody. */
+  @IsOptional() @IsString() @MaxLength(60) clientId?: string | null;
 }
 
 class UpdateHolidayDto {
@@ -30,6 +32,7 @@ class UpdateHolidayDto {
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(80) nameEn?: string;
   @IsOptional() @IsBoolean() paid?: boolean;
   @IsOptional() @IsBoolean() active?: boolean;
+  @IsOptional() @IsString() @MaxLength(60) clientId?: string | null;
 }
 
 class CheckQuery {

@@ -20,6 +20,15 @@ export const isValidDay = (value: unknown): value is string => {
 
 export const addDays = (day: string, days: number): string => formatDay(new Date(parseDay(day).getTime() + days * MS_PER_DAY));
 
+/** `2026-01-31` + 1 month = `2026-02-28` (the day of the month is kept when the month is long enough, else the last day). */
+export function addMonths(day: string, months: number): string {
+  const date = parseDay(day);
+  const target = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(date.getUTCDate(), lastDay));
+  return formatDay(target);
+}
+
 /** 0 = Sunday … 6 = Saturday. */
 export const weekdayOf = (day: string): number => parseDay(day).getUTCDay();
 

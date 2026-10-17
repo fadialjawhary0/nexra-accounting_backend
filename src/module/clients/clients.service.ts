@@ -20,6 +20,7 @@ import { FormsService } from '../forms/forms.service.js';
 import { ListsService } from '../lists/lists.service.js';
 import { NumberingService } from '../numbering/numbering.service.js';
 import { EmployeesService } from '../employees/employees.service.js';
+import { OPEN_STATUSES as OPEN_INSPECTION_STATUSES } from '../inspections/inspections.constants.js';
 import { PeopleService } from '../people/people.service.js';
 import { matrixAllows, type PermissionMatrix } from '../roles/permission-catalog.js';
 import { ClientFoldersService } from './client-folders.service.js';
@@ -124,13 +125,17 @@ export class ClientsService implements OnModuleInit {
     if (audit && secret.length) await this.audit.log({ action: 'revealed', entityType: 'client', entityId: row.id, entityLabel: displayLabel(row), meta: { fields: secret } });
     // Only people who may open workers are told how many there are.
     const mayOpenWorkers = matrixAllows(user.matrix, 'employees.view');
-    const [people, relations, employees, activeEmployees, documents, userNames] = await Promise.all([
+    const mayOpenContracts = matrixAllows(user.matrix, 'contracts.view');
+    const mayOpenInspections = matrixAllows(user.matrix, 'inspections.view');
+    const [people, relations, employees, activeEmployees, documents, userNames, contracts, inspections] = await Promise.all([
       this.prisma.clientPerson.count({ where: { clientId: id } }),
       this.prisma.clientRelation.count({ where: { OR: [{ fromId: id }, { toId: id }] } }),
       mayOpenWorkers ? this.prisma.employee.count({ where: { clientId: id } }) : Promise.resolve(null),
       mayOpenWorkers ? this.prisma.employee.count({ where: { clientId: id, isActive: true } }) : Promise.resolve(null),
-      this.folders.countFiles(id),
+      this.folders.countFiles(id, user.matrix),
       this.userNames(row.responsibleUserId ? [row.responsibleUserId] : []),
+      mayOpenContracts ? this.prisma.contract.count({ where: { clientId: id, status: { in: ['draft', 'sent', 'active'] } } }) : Promise.resolve(null),
+      mayOpenInspections ? this.prisma.inspection.count({ where: { clientId: id, isActive: true, status: { in: [...OPEN_INSPECTION_STATUSES] } } }) : Promise.resolve(null),
     ]);
     return {
       id: row.id,
@@ -142,7 +147,7 @@ export class ClientsService implements OnModuleInit {
       deactivatedAt: row.deactivatedAt?.toISOString() ?? null,
       responsibleUser: row.responsibleUserId ? { id: row.responsibleUserId, name: userNames.get(row.responsibleUserId) ?? '' } : null,
       values,
-      counts: { people, relations, employees, activeEmployees, documents },
+      counts: { people, relations, employees, activeEmployees, documents, contracts, inspections },
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };

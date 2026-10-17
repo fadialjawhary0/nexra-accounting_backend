@@ -162,13 +162,7 @@ export class ClientsController {
 
   /* ── Documents ────────────────────────────────────────────────────────────────────────────────────────────────── */
 
-  /** The client's folders and files (upload with `POST /files`: `purpose=attachment`, `area=clients`, `entityType=client`, `entityId`, `folderId`). */
-  @Get(':id/documents')
-  async documents(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
-    await this.clients.findOrThrow(id);
-    return this.folders.documents(id, user.matrix);
-  }
-
+  /** The client's folders (the documents in them are listed by `GET /documents?clientId=`). */
   @RequirePermission('clients.edit')
   @Post(':id/folders')
   async createFolder(@Param('id') id: string, @Body() dto: CreateFolderDto) {

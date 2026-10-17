@@ -1,10 +1,13 @@
 import { Module } from '@nestjs/common';
+import { DocumentSettingsModule } from '../document-settings/document-settings.module.js';
 import { EmployeesModule } from '../employees/employees.module.js';
 import { FilesModule } from '../files/files.module.js';
 import { FormsModule } from '../forms/forms.module.js';
 import { ListsModule } from '../lists/lists.module.js';
 import { NumberingModule } from '../numbering/numbering.module.js';
 import { PeopleModule } from '../people/people.module.js';
+import { SearchModule } from '../search/search.module.js';
+import { ClientSearchProvider } from './client-search.provider.js';
 import { ClientFoldersService } from './client-folders.service.js';
 import { ClientPeopleService } from './client-people.service.js';
 import { ClientQualityService } from './client-quality.service.js';
@@ -14,9 +17,9 @@ import { ClientsService } from './clients.service.js';
 
 /** Clients (Klanten): the grid, the client form, people and their roles, relations between clients, the client's folders, data quality and export. */
 @Module({
-  imports: [FormsModule, NumberingModule, ListsModule, FilesModule, PeopleModule, EmployeesModule],
+  imports: [FormsModule, NumberingModule, ListsModule, FilesModule, PeopleModule, EmployeesModule, DocumentSettingsModule, SearchModule],
   controllers: [ClientsController],
-  providers: [ClientsService, ClientPeopleService, ClientRelationsService, ClientFoldersService, ClientQualityService],
-  exports: [ClientsService],
+  providers: [ClientsService, ClientPeopleService, ClientRelationsService, ClientFoldersService, ClientQualityService, ClientSearchProvider],
+  exports: [ClientsService, ClientPeopleService, ClientFoldersService],
 })
 export class ClientsModule {}

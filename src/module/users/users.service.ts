@@ -14,6 +14,8 @@ import { MailService } from '../../lib/mail/mail.service.js';
 import { AccountTokenService, INVITE_TTL_MS, RESET_TTL_MS } from '../auth/account-token.service.js';
 import { TokenService } from '../auth/token.service.js';
 import { TwoFactorService } from '../auth/two-factor.service.js';
+import { OPEN_STATUSES as OPEN_INSPECTION_STATUSES } from '../inspections/inspections.constants.js';
+import { OPEN_RETURN_STATUSES } from '../taxes/taxes.constants.js';
 import { ListsService } from '../lists/lists.service.js';
 import { OWNER_ROLE_KEY, effectiveMatrix, escalations, sanitizeOverrides } from '../roles/permission-catalog.js';
 import type { InviteUserDto, UpdateUserDto, UserListQuery } from './dto/user.dto.js';
@@ -79,10 +81,26 @@ export class UsersService {
     return users.map(user => ({ id: user.id, name: user.name, active: user.status === 'active' }));
   }
 
-  /** What each person is responsible for: today the active clients they handle (the other counters arrive with their modules). */
+  /** What each person is responsible for: the active clients they handle, the yearly returns still to file and the open inspections assigned to them (the other counters arrive with their modules). */
   private async workloads(ids: string[]): Promise<Map<string, UserWorkload>> {
-    const groups = ids.length ? await this.prisma.client.groupBy({ by: ['responsibleUserId'], where: { isActive: true, responsibleUserId: { in: ids } }, _count: { _all: true } }) : [];
-    return new Map(groups.flatMap(group => (group.responsibleUserId ? [[group.responsibleUserId, { ...EMPTY_WORKLOAD, clients: group._count._all, total: group._count._all }] as const] : [])));
+    const workloads = new Map<string, UserWorkload>();
+    if (!ids.length) return workloads;
+    const [clients, inspections, returns] = await Promise.all([
+      this.prisma.client.groupBy({ by: ['responsibleUserId'], where: { isActive: true, responsibleUserId: { in: ids } }, _count: { _all: true } }),
+      this.prisma.inspection.groupBy({ by: ['assigneeId'], where: { isActive: true, status: { in: [...OPEN_INSPECTION_STATUSES] }, assigneeId: { in: ids } }, _count: { _all: true } }),
+      this.prisma.taxReturn.groupBy({ by: ['assigneeId'], where: { isActive: true, status: { in: [...OPEN_RETURN_STATUSES] }, assigneeId: { in: ids } }, _count: { _all: true } }),
+    ]);
+    const add = (userId: string | null, field: 'clients' | 'openInspections' | 'openReturns', count: number) => {
+      if (!userId) return;
+      const workload = workloads.get(userId) ?? { ...EMPTY_WORKLOAD };
+      workload[field] += count;
+      workload.total += count;
+      workloads.set(userId, workload);
+    };
+    for (const group of clients) add(group.responsibleUserId, 'clients', group._count._all);
+    for (const group of inspections) add(group.assigneeId, 'openInspections', group._count._all);
+    for (const group of returns) add(group.assigneeId, 'openReturns', group._count._all);
+    return workloads;
   }
 
   /** The list (same filters, same sort, all pages) as a table for Excel / PDF / Word. */

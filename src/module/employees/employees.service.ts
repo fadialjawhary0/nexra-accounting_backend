@@ -12,7 +12,7 @@ import { AuditService } from '../../lib/audit/audit.service.js';
 import { PrismaService } from '../../lib/database/prisma.service.js';
 import { SettingsService } from '../../lib/settings/settings.service.js';
 import { MAX_EXPORT_ROWS, type ExportColumn, type ExportFormat, type ExportTable } from '../../lib/exports/export.types.js';
-import { serializeFile } from '../files/files.service.js';
+import { DOCUMENT_PURPOSES, viewableAreas } from '../files/files.constants.js';
 import { canEditField, canViewField, valuesFor } from '../forms/field-access.js';
 import { exportType, exportValue, exportWidth } from '../forms/field-export.js';
 import { fieldFilter, fieldOrder, parseSort, searchAcross, type QueryContext } from '../forms/dynamic-query.js';
@@ -24,6 +24,7 @@ import { ListsService } from '../lists/lists.service.js';
 import { PeopleService, type PersonPlan } from '../people/people.service.js';
 import { PERSON_COLUMNS, PERSON_ENTITY, personName } from '../people/person-record.js';
 import type { PermissionMatrix } from '../roles/permission-catalog.js';
+import { DocumentTypesService } from '../document-settings/document-types.service.js';
 import { EmployeeFoldersService } from './employee-folders.service.js';
 import { EmployeeRatesService } from './employee-rates.service.js';
 import { EMPLOYEE_COLUMNS, EMPLOYEE_DATE_COLUMNS, EMPLOYEE_ENTITY, PERSON_PREFIX, RATE_FIELD, currentRateSql } from './employee-record.js';
@@ -43,6 +44,16 @@ const CLIENT_NUMBER = Prisma.raw(`lpad(c."number", 12, '0')`);
 const LAST_NAME = Prisma.raw(`lower(unaccent(p."lastName"))`);
 const FIRST_NAME = Prisma.raw(`lower(unaccent(p."firstName"))`);
 
+/** What a module that reacts to a worker leaving is told. */
+export interface StopEvent {
+  employeeId: string;
+  /** The last day of the employment (`YYYY-MM-DD`). */
+  endDate: string;
+  reason: string;
+  user: AuthenticatedUser;
+}
+export type StopListener = (event: StopEvent) => Promise<void>;
+
 type EmployeeWithPeople = Employee & { person: Person; client: { id: string; number: string; name: string; isActive: boolean } };
 const WITH_PEOPLE = { person: true, client: { select: { id: true, number: true, name: true, isActive: true } } } as const;
 
@@ -55,6 +66,7 @@ const WITH_PEOPLE = { person: true, client: { select: { id: true, number: true, 
 @Injectable()
 export class EmployeesService implements OnModuleInit {
   private readonly logger = new Logger(EmployeesService.name);
+  private readonly stopListeners: StopListener[] = [];
 
   constructor(
     private readonly prisma: PrismaService,
@@ -67,7 +79,13 @@ export class EmployeesService implements OnModuleInit {
     private readonly rates: EmployeeRatesService,
     private readonly folders: EmployeeFoldersService,
     private readonly settings: SettingsService,
+    private readonly types: DocumentTypesService,
   ) {}
+
+  /** Other modules that must react when a worker leaves (Contracts ends the worker's open contracts) register here. */
+  onStopped(listener: StopListener): void {
+    this.stopListeners.push(listener);
+  }
 
   onModuleInit(): void {
     this.forms.onPublish(EMPLOYEE_ENTITY, () => this.reindex());
@@ -82,13 +100,14 @@ export class EmployeesService implements OnModuleInit {
 
   async list(query: EmployeeListQuery, filters: Record<string, string>, user: AuthenticatedUser, locale: AppLocale): Promise<ApiResult> {
     const docs = await this.docs();
-    const plan = this.plan(query, filters, docs, user.matrix, locale);
+    const expiryFields = await this.types.fieldKeys();
+    const plan = this.plan(query, filters, docs, user.matrix, locale, expiryFields);
     const skip = (query.page - 1) * query.pageSize;
 
     const [ids, totals, stats] = await Promise.all([
       this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT e."id" ${plan.from} ${plan.join} WHERE ${plan.where} ORDER BY ${plan.order} LIMIT ${query.pageSize} OFFSET ${skip}`),
       this.prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`SELECT count(*) AS "count" ${plan.from} WHERE ${plan.where}`),
-      query.stats ? this.stats(user, docs) : undefined,
+      query.stats ? this.stats(user, docs, expiryFields) : undefined,
     ]);
     const total = Number(totals[0]?.count ?? 0);
     const rows = await this.inOrder(ids.map(row => row.id));
@@ -115,7 +134,7 @@ export class EmployeesService implements OnModuleInit {
     const docs = await this.docs();
     const rate = this.mayDo(docs.employee, 'view', user.matrix) ? await this.rates.current(id) : null;
     const view = this.view(row, rate, docs, user.matrix);
-    const [folder, belongs, documents] = await Promise.all([this.folders.describe(id), this.people.belongsTo(row.personId), this.countDocuments(id)]);
+    const [folder, belongs, documents, contracts] = await Promise.all([this.folders.describe(id), this.people.belongsTo(row.personId), this.countDocuments(id, row.personId, user.matrix), this.countContracts(id)]);
     return {
       id: row.id,
       isActive: row.isActive,
@@ -128,7 +147,7 @@ export class EmployeesService implements OnModuleInit {
       values: view.values,
       rate,
       folder,
-      counts: { documents },
+      counts: { documents, contracts },
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
@@ -140,13 +159,6 @@ export class EmployeesService implements OnModuleInit {
     if (!this.mayDo(doc, action, user.matrix)) throw new ForbiddenException({ code: 'forbidden', message: 'You do not have access to this.' });
   }
 
-  /** The worker's own folder with the files in it. */
-  async documents(id: string) {
-    await this.findOrThrow(id);
-    const folder = await this.folders.describe(id);
-    const files = folder ? await this.prisma.storedFile.findMany({ where: { folderId: folder.id, isActive: true }, orderBy: { createdAt: 'desc' }, take: 1000 }) : [];
-    return { folder, files: files.map(serializeFile) };
-  }
 
   /** A short list for pickers (contracts, hours …): workers matching a name, optionally of one client. */
   async lookup(query: EmployeeLookupQuery) {
@@ -317,6 +329,7 @@ export class EmployeesService implements OnModuleInit {
       entityLabel: await this.label(id),
       meta: stopping ? { endDate, ...(reason && { reason }) } : { previousEndDate: day(row.endDate), ...(row.deactivationReason && { previousReason: row.deactivationReason }) },
     });
+    if (stopping) for (const listener of this.stopListeners) await listener({ employeeId: id, endDate: endDate!, reason, user });
     return this.get(id, user);
   }
 
@@ -334,7 +347,7 @@ export class EmployeesService implements OnModuleInit {
   /** The list (same search, filters and sorting; every page) as a table: the columns the person sees, from both forms. */
   async exportTable(query: EmployeeExportQuery, filters: Record<string, string>, user: AuthenticatedUser, locale: AppLocale, format: ExportFormat): Promise<{ table: ExportTable; count: number }> {
     const docs = await this.docs();
-    const plan = this.plan(query, filters, docs, user.matrix, locale);
+    const plan = this.plan(query, filters, docs, user.matrix, locale, await this.types.fieldKeys());
     const ids = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT e."id" ${plan.from} ${plan.join} WHERE ${plan.where} ORDER BY ${plan.order} LIMIT ${MAX_EXPORT_ROWS + 1}`);
     const rows = await this.inOrder(ids.map(row => row.id));
     const rates = await this.rates.currentRates(rows.map(row => row.id));
@@ -492,8 +505,22 @@ export class EmployeesService implements OnModuleInit {
     }
   }
 
-  private countDocuments(id: string): Promise<number> {
-    return this.prisma.storedFile.count({ where: { isActive: true, folder: { employeeId: id } } });
+  /** The worker's contracts that are still open (draft, sent or running). */
+  private countContracts(id: string): Promise<number> {
+    return this.prisma.contract.count({ where: { employeeId: id, status: { in: ['draft', 'sent', 'active'] } } });
+  }
+
+  /** The worker's documents the person may open (the number on the worker's Documents tab): filed on the worker, and the copies on the person's record. */
+  private countDocuments(id: string, personId: string, matrix: PermissionMatrix): Promise<number> {
+    return this.prisma.storedFile.count({
+      where: {
+        isActive: true,
+        isCurrent: true,
+        purpose: { in: [...DOCUMENT_PURPOSES] },
+        area: { in: viewableAreas(matrix) },
+        OR: [{ entityType: 'employee', entityId: id }, { entityType: 'person', entityId: personId }],
+      },
+    });
   }
 
   /** The last day cannot be before the first day. */
@@ -526,7 +553,7 @@ export class EmployeesService implements OnModuleInit {
   /* ── Queries ──────────────────────────────────────────────────────────────────────────────────────────────────── */
 
   /** FROM / JOIN / WHERE / ORDER BY of a list or export request. */
-  private plan(query: EmployeeListQuery, filters: Record<string, string>, docs: { employee: FormDoc; person: FormDoc }, matrix: PermissionMatrix, locale: AppLocale) {
+  private plan(query: EmployeeListQuery, filters: Record<string, string>, docs: { employee: FormDoc; person: FormDoc }, matrix: PermissionMatrix, locale: AppLocale, expiryFields: string[]) {
     const employeeContext: QueryContext = { alias: 'e', columns: EMPLOYEE_COLUMNS, locale, dateColumns: EMPLOYEE_DATE_COLUMNS, expressions: { [RATE_FIELD]: currentRateSql('e') } };
     const personContext: QueryContext = { alias: 'p', columns: PERSON_COLUMNS, locale };
     const usable = (field: FieldDef) => field.active && !isEncryptedField(field) && canViewField(field, matrix);
@@ -538,7 +565,7 @@ export class EmployeesService implements OnModuleInit {
     if (statuses.length === 1) conditions.push(Prisma.sql`e."isActive" = ${statuses[0] === 'active'}`);
     if (query.expiring === 'true') {
       // "Documents about to expire" — only for people who may see the dates; for everybody else the list is simply empty.
-      const keys = this.expiryKeys(docs.person, matrix);
+      const keys = this.expiryKeys(docs.person, matrix, expiryFields);
       conditions.push(keys.length ? Prisma.sql`(e."isActive" AND ${this.expiresSoon(keys)})` : Prisma.sql`FALSE`);
     }
     const search = searchAcross(['e', 'p', 'c'], query.search);
@@ -590,14 +617,14 @@ export class EmployeesService implements OnModuleInit {
   }
 
   /** The counters above the grid; documents that expire only count for people who may see them (they are sensitive data). */
-  private async stats(user: AuthenticatedUser, docs: { employee: FormDoc; person: FormDoc }) {
+  private async stats(user: AuthenticatedUser, docs: { employee: FormDoc; person: FormDoc }, expiryFields: string[]) {
     const [groups, activeClients] = await Promise.all([
       this.prisma.employee.groupBy({ by: ['isActive'], _count: { _all: true } }),
       this.prisma.employee.findMany({ where: { isActive: true }, distinct: ['clientId'], select: { clientId: true } }),
     ]);
     const active = groups.find(group => group.isActive)?._count._all ?? 0;
     const stopped = groups.find(group => !group.isActive)?._count._all ?? 0;
-    const keys = this.expiryKeys(docs.person, user.matrix);
+    const keys = this.expiryKeys(docs.person, user.matrix, expiryFields);
     let expiring: number | null = null;
     if (keys.length) {
       const rows = await this.prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
@@ -608,11 +635,11 @@ export class EmployeesService implements OnModuleInit {
   }
 
   /**
-   * The person-form fields that hold the end of a document's validity (`id_expiry`, `permit_expiry` …): date fields whose key ends in `_expiry`
-   * that this person may see. (Phase 12 replaces this convention with document types and their valid-until rules.)
+   * The person-form fields that hold the end of a document's validity (`id_expiry`, `permit_expiry` …): the date fields the document types that
+   * "follow the worker's record" name (Settings → Documents → Types), limited to the ones this person may see.
    */
-  private expiryKeys(person: FormDoc, matrix: PermissionMatrix): string[] {
-    return person.fields.filter(field => field.active && field.type === 'date' && field.key.endsWith('_expiry') && !isEncryptedField(field) && canViewField(field, matrix)).map(field => field.key);
+  private expiryKeys(person: FormDoc, matrix: PermissionMatrix, expiryFields: readonly string[]): string[] {
+    return person.fields.filter(field => field.active && field.type === 'date' && expiryFields.includes(field.key) && !isEncryptedField(field) && canViewField(field, matrix)).map(field => field.key);
   }
 
   /** "Expired, or expires within the warning period" for any of these fields (days are stored as `YYYY-MM-DD`, so text comparison is date comparison). */
