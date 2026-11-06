@@ -5,6 +5,9 @@ import { RequirePermission } from '../../common/decorators/require-permission.de
 import { REQUIREMENT_SCOPES, type RequirementScope } from './document-settings.constants.js';
 import { RequiredDocumentDto } from './dto/document-settings.dto.js';
 import { RequiredDocumentsService } from './required-documents.service.js';
+import { DeletionService } from '../deletion/deletion.service.js';
+import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
+import type { AuthenticatedUser } from '../../common/types/authenticated-user.js';
 
 class FieldsQuery {
   @IsOptional() @IsIn(REQUIREMENT_SCOPES) scope?: RequirementScope;
@@ -14,7 +17,10 @@ class FieldsQuery {
 @Controller('required-documents')
 @RequirePermission('settings.view')
 export class RequiredDocumentsController {
-  constructor(private readonly required: RequiredDocumentsService) {}
+  constructor(
+    private readonly required: RequiredDocumentsService,
+    private readonly deletion: DeletionService,
+  ) {}
 
   @Get()
   list(@Locale() locale: AppLocale) {
@@ -51,10 +57,10 @@ export class RequiredDocumentsController {
     return this.required.setActive(id, false, locale);
   }
 
-  @RequirePermission('settings.edit')
+  /** Deletes a rule (soft). */
+  @RequirePermission('settings.remove')
   @Delete(':id')
-  async remove(@Param('id') id: string) {
-    await this.required.remove(id);
-    return { id };
+  remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.deletion.delete('required_document', id, user);
   }
 }

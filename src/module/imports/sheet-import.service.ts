@@ -294,6 +294,8 @@ export class SheetImportService {
       if (!has('hours.client') && !dto.clientId) problems.clientId = 'imports.clientRequired';
     }
     if (dto.clientId && !(await this.prisma.client.findUnique({ where: { id: dto.clientId }, select: { id: true } }))) problems.clientId = 'validation.invalid';
+    // Rows that were saved already are records of their kind: the kind of rows can no longer change (the other rows would be read as something else).
+    if (dto.target !== job.target && (await this.prisma.importItem.count({ where: { jobId, status: 'accepted' } }))) problems.target = 'imports.targetLocked';
     for (const field of Object.keys(dto.defaults ?? {})) {
       const definition = known.get(field);
       if (!definition || definition.special) problems[`defaults.${field}`] = 'validation.selectOption';
@@ -314,9 +316,9 @@ export class SheetImportService {
       weekStart: dto.weekStart ?? null,
       personRole: dto.personRole ?? null,
     };
-    // A changed setup makes the rows that were checked before out of date.
+    // A changed setup makes the rows that were checked before out of date; the rows that were saved already stay (they are records now).
     await this.prisma.$transaction([
-      this.prisma.importItem.deleteMany({ where: { jobId } }),
+      this.prisma.importItem.deleteMany({ where: { jobId, status: { not: 'accepted' } } }),
       this.prisma.importJob.update({ where: { id: jobId }, data: { target: dto.target, status: 'draft', activity: null, note: '', options: setup as unknown as object } }),
     ]);
     if (dto.saveAs?.trim()) {

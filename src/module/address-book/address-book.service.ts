@@ -8,6 +8,7 @@ import { validationFailed } from '../../common/validation/failure.js';
 import type { AddressBookEntry, Prisma } from '../../generated/prisma/client.js';
 import { AuditService } from '../../lib/audit/audit.service.js';
 import { PrismaService } from '../../lib/database/prisma.service.js';
+import { ALIVE } from '../../lib/database/soft-delete.js';
 import type { ExportTable } from '../../lib/exports/export.types.js';
 import { ExportsService } from '../../lib/exports/exports.service.js';
 import { ADDRESS_ENTITY } from './address-book.constants.js';
@@ -92,7 +93,7 @@ export class AddressBookService {
     const orderBy = toOrderBy(query.sort, ['name', 'city', 'category', 'createdAt'], [{ sortOrder: 'asc' }, { name: 'asc' }]) as Prisma.AddressBookEntryOrderByWithRelationInput[];
     const [total, rows, counts] = await Promise.all([
       this.prisma.addressBookEntry.count({ where }),
-      this.prisma.addressBookEntry.findMany({ where, orderBy, include: { _count: { select: { forms: true, submissions: true } } }, ...toSkipTake(query) }),
+      this.prisma.addressBookEntry.findMany({ where, orderBy, include: { _count: { select: { forms: { where: ALIVE }, submissions: { where: ALIVE } } } }, ...toSkipTake(query) }),
       query.stats ? this.prisma.addressBookEntry.groupBy({ by: ['isActive'], where: this.where({ search: query.search, category: query.category, status: 'all' }), _count: { _all: true } }) : Promise.resolve(null),
     ]);
     return paged(
@@ -102,7 +103,7 @@ export class AddressBookService {
   }
 
   async rowOrThrow(id: string): Promise<Row> {
-    const row = await this.prisma.addressBookEntry.findUnique({ where: { id }, include: { _count: { select: { forms: true, submissions: true } } } });
+    const row = await this.prisma.addressBookEntry.findUnique({ where: { id }, include: { _count: { select: { forms: { where: ALIVE }, submissions: { where: ALIVE } } } } });
     if (!row) throw new NotFoundException({ code: 'not_found', message: 'Address not found' });
     return row;
   }
@@ -200,7 +201,7 @@ export class AddressBookService {
   async exportTable(query: AddressExportQuery, locale: AppLocale): Promise<ExportTable> {
     const where = this.where(query);
     this.exports.assertSize(await this.prisma.addressBookEntry.count({ where }));
-    const rows = await this.prisma.addressBookEntry.findMany({ where, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }], include: { _count: { select: { forms: true, submissions: true } } } });
+    const rows = await this.prisma.addressBookEntry.findMany({ where, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }], include: { _count: { select: { forms: { where: ALIVE }, submissions: { where: ALIVE } } } } });
     const categories = await this.prisma.listItem.findMany({ where: { list: { key: 'address_category' } }, select: { code: true, nameNl: true, nameEn: true } });
     const nl = locale === 'nl';
     const categoryName = new Map(categories.map(item => [item.code, nl ? item.nameNl : item.nameEn]));

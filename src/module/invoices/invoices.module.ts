@@ -13,10 +13,11 @@ import { InvoiceNumberingService } from './invoice-numbering.service.js';
 import { InvoicesController } from './invoices.controller.js';
 import { InvoicesService } from './invoices.service.js';
 import { MarkupReportService } from './markup-report.service.js';
+import { DeletionModule } from '../deletion/deletion.module.js';
 
 /** Invoices about hours (incoming from staffing companies, outgoing to the companies that used the workers) and the markup report. */
 @Module({
-  imports: [FormsModule, FilesModule, HoursModule, ReconciliationModule, RemindersModule, TemplatesModule, SearchModule],
+  imports: [DeletionModule, FormsModule, FilesModule, HoursModule, ReconciliationModule, RemindersModule, TemplatesModule, SearchModule],
   controllers: [InvoicesController],
   providers: [InvoicesService, InvoiceDocumentsService, InvoiceNumberingService, InvoiceRemindersService, MarkupReportService, InvoiceSearchProvider],
   exports: [InvoicesService, MarkupReportService],

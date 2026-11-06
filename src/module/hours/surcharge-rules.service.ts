@@ -77,14 +77,6 @@ export class SurchargeRulesService {
     return this.serialize(updated);
   }
 
-  /** Statements keep the name and the amounts of the rule in their lines, so a rule that is no longer wanted can simply be removed. */
-  async remove(id: string) {
-    const row = await this.find(id);
-    await this.prisma.surchargeRule.delete({ where: { id } });
-    await this.audit.log({ action: 'deleted', entityType: 'surcharge_rule', entityId: id, entityLabel: row.name, before: this.snapshot(row) });
-    return { deleted: true };
-  }
-
   /* ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────── */
 
   private async find(id: string): Promise<RuleRow> {

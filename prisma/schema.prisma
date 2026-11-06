@@ -76,6 +76,14 @@ model Role {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   users            User[]
+
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 model User {
@@ -119,8 +127,15 @@ model User {
   recoveryCodes RecoveryCode[]
   notifications Notification[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([status])
   @@index([roleId])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// A password a person used before (only its hash): the next ones may not repeat it (Settings → Security policy → "do not reuse the last N passwords").
@@ -253,6 +268,14 @@ model List {
   items         ListItem[]
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
+
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 model ListItem {
@@ -272,8 +295,15 @@ model ListItem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@unique([listId, code])
   @@index([listId, sortOrder])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 // ───────────────────────────── Netherlands calendar ─────────────────────────────
@@ -302,8 +332,15 @@ model Holiday {
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@unique([date, code])
   @@index([date])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 // ───────────────────────────── Files ─────────────────────────────
@@ -358,6 +395,11 @@ model StoredFile {
   text            DocumentText?
   inspectionItems InspectionItemFile[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([entityType, entityId])
   @@index([purpose])
   @@index([folderId])
@@ -366,6 +408,8 @@ model StoredFile {
   @@index([clientId, isActive])
   @@index([rootId])
   @@index([validUntil])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 // ───────────────────────────── Documents ─────────────────────────────
@@ -404,7 +448,14 @@ model DocumentType {
   updatedAt      DateTime           @updatedAt
   required       RequiredDocument[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([isActive, sortOrder])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// A standard folder of a client (Settings → Documents → Folders): made for every new client, inside the folder `<number>- <name>` or inside another
@@ -424,6 +475,14 @@ model FolderTemplate {
   isSystem   Boolean          @default(false)
   createdAt  DateTime         @default(now())
   updatedAt  DateTime         @updatedAt
+
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// "Every client / worker (that fits the condition) must have a current document of this type." Evaluated live against the files, so a changed rule
@@ -442,7 +501,14 @@ model RequiredDocument {
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([scope, isActive])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// A file that also belongs to another record: a contract's signed copy, an invoice's PDF, a statement. The file stays where it is filed; the link
@@ -558,10 +624,17 @@ model Client {
   tasks              Task[]
   calendarEvents     CalendarEvent[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([isActive])
   @@index([legalForm])
   @@index([data], type: Gin)
   @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// An owner, director, partner or contact person of one or more clients. The columns are what lists and search need, the rest of
@@ -644,7 +717,14 @@ model Folder {
   files        StoredFile[]
   inspections  Inspection[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([clientId, parentId])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 // ───────────────────────────── Unique form values ─────────────────────────────
@@ -698,11 +778,18 @@ model Employee {
   invoiceLines    InvoiceLine[]
   formSubmissions FormSubmission[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([clientId, isActive])
   @@index([personId])
   @@index([isActive])
   @@index([data], type: Gin)
   @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// The hourly rate of a worker over time. The rate that applies today is the latest row that starts on or before today; a change adds a row,
@@ -749,8 +836,15 @@ model Template {
   versions        TemplateVersion[]
   contracts       Contract[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([kind, isActive])
   @@index([clientId])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 model TemplateVersion {
@@ -822,6 +916,11 @@ model Contract {
   updatedAt         DateTime           @updatedAt
   documents         ContractDocument[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([clientId, status])
   @@index([employeeId])
   @@index([status, isActive])
@@ -829,6 +928,8 @@ model Contract {
   @@index([renewalOfId])
   @@index([data], type: Gin)
   @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// A document of a contract: the contract itself (Word + PDF), a letter made from a template, or the signed scan. The files are StoredFiles in the
@@ -853,7 +954,14 @@ model ContractDocument {
   createdById       String?
   createdAt         DateTime         @default(now())
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([contractId, kind])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 // ───────────────────────────── Reminders, notifications, messages ─────────────────────────────
@@ -878,7 +986,14 @@ model ReminderRule {
   updatedAt  DateTime       @updatedAt
   sent       ReminderSent[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([trigger])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// A reminder that was sent (or deliberately skipped), so nothing is ever sent twice. A changed date (a contract that was extended) is a new `dueOn`
@@ -957,7 +1072,14 @@ model MessageTemplate {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([channel, scope, isActive])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 // ───────────────────────────── Hours & salary statements ─────────────────────────────
@@ -989,9 +1111,16 @@ model HourEntry {
   updatedById  String?
   updatedAt    DateTime @updatedAt
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([employeeId, date])
   @@index([clientId, date])
   @@index([date])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// An extra pay rule: a percentage of the hourly rate (or a fixed amount per hour) for hours on weekend days, on public holidays, after so many hours
@@ -1017,8 +1146,15 @@ model SurchargeRule {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([isActive, kind])
   @@index([clientId])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// Days of one worker that are closed: a salary statement or an invoice was made for them, or the office closed the period. Changing a closed day needs the
@@ -1087,9 +1223,16 @@ model SalaryStatement {
   cancelReason     String       @default("")
   locks            PeriodLock[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([employeeId, periodFrom])
   @@index([clientId, periodFrom])
   @@index([status, periodFrom])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 // ───────────────────────────── Invoices ─────────────────────────────
@@ -1114,9 +1257,16 @@ model Counterparty {
 
   invoices Invoice[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([isActive])
   @@index([kvk])
   @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// An invoice that is about hours worked. `incoming` — a staffing company bills one of the office's clients for workers it supplied; `outgoing` — a client
@@ -1180,6 +1330,11 @@ model Invoice {
   lines InvoiceLine[]
   locks PeriodLock[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([clientId, direction, status])
   @@index([counterpartyId])
   @@index([otherClientId])
@@ -1187,6 +1342,8 @@ model Invoice {
   @@index([status])
   @@index([creditOfId])
   @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// One line of an invoice. An `hours` line is a worker's hours over a period at a rate (the worker is linked when known; `rawName` is the name as it stands
@@ -1250,8 +1407,15 @@ model ImportJob {
   updatedAt   DateTime     @updatedAt
   items       ImportItem[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([createdAt])
   @@index([status])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// One file or one row of an import — or one thing the message of an inbox asks for — with what was read from it and what happened to it.
@@ -1323,7 +1487,14 @@ model ImportMapping {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@unique([target, name])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// One call to the AI: what it was for, how many tokens it used and what that cost (an estimate from the model's price) — so Ahmad sees what it costs him.
@@ -1383,7 +1554,14 @@ model AddressBookEntry {
   forms             OfficialForm[]
   submissions       FormSubmission[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([isActive, category])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// An official PDF form of the library (Melding loonheffingen, Verzoek deblokkering G-rekening …): who it is for, where it goes, how its file is named.
@@ -1398,8 +1576,6 @@ model OfficialForm {
   descriptionEn   String                @default("")
   /// The code printed on the form itself ("CPT 158").
   authorityCode   String                @default("")
-  /// The page of the issuing authority where the form is published.
-  officialUrl     String                @default("")
   /// What the form is about, which decides what is asked after the client: `client`, `person` (an owner, director or partner) or `worker`.
   subject         String                @default("client")
   /// `none`, `year` (a calendar year) or `range` (from – to).
@@ -1428,7 +1604,14 @@ model OfficialForm {
   versions        OfficialFormVersion[]
   submissions     FormSubmission[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([isActive, sortOrder])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// One edition of the blank PDF of a form, with the fields found in it and what goes into each of them. A new edition is a new version; what was
@@ -1443,12 +1626,14 @@ model OfficialFormVersion {
   fileId      String           @unique
   fileName    String
   pageCount   Int              @default(1)
-  /// The fields found in the PDF when it was uploaded: `[{ name, kind, page, options, maxLength, multiline, readOnly, tooltip }]`.
+  /// The fields found in the PDF when it was uploaded — `[{ name, kind, page, options, maxLength, multiline, readOnly, tooltip, box, context }]` — and the boxes placed on
+  /// the pages of a PDF without fields (`placed: true`, written onto the page when the form is filled; see official-forms/form-fields.ts).
   fields      Json             @default("[]")
   /// What goes into each PDF field: `[{ pdfField, label, source, format, test, choices, required }]` (see official-forms/form-mapping.ts).
   mapping     Json             @default("[]")
-  /// A made-up example that ships with the system, to be replaced by the official PDF.
-  isSample    Boolean          @default(false)
+  /// What the AI did to set the PDF up (linking its fields, or finding the boxes of a PDF without fields): `{ status, error, at, linked, boxes, suggested, details }`
+  /// (see official-forms/form-setup.ts).
+  setup       Json             @default("{}")
   note        String           @default("")
   createdById String?
   createdAt   DateTime         @default(now())
@@ -1505,10 +1690,17 @@ model FormSubmission {
   updatedAt          DateTime            @updatedAt
   searchText         String              @default("")
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([clientId, isActive])
   @@index([formId, status])
   @@index([status, followUpOn])
   @@index([preparedOn])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 // ───────────────────────────── Inspections (control) ─────────────────────────────
@@ -1534,7 +1726,14 @@ model ChecklistTemplate {
   updatedAt       DateTime           @updatedAt
   versions        ChecklistVersion[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([isActive, sortOrder])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// One edition of a checklist (the bureau's list is "version 13"). A draft is edited; a published version is never changed — a change is a new version, and
@@ -1620,11 +1819,18 @@ model Inspection {
   followUps          InspectionFollowUp[]
   handovers          InspectionHandover[]
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([clientId, date])
   @@index([status, date])
   @@index([isActive, date])
   @@index([date])
   @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// What people decided about one line of an inspection's checklist: "not applicable to this client", "done" (it was shown in another way), a note, documents
@@ -1729,7 +1935,14 @@ model VatStep {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([isActive, sortOrder])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// One VAT return of one client: a quarter (or a month, or a year — what the client's VAT frequency says) with the steps ticked so far. The rows of a period are made by the
@@ -1755,9 +1968,16 @@ model VatPeriod {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@unique([clientId, kind, periodStart])
   @@index([kind, periodStart, isActive])
   @@index([periodEnd, completedAt])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// A yearly return of a client: income tax (IB) of an owner or a partner, or corporate income tax (VPB) of the company — where it stands, when it was filed, the filed return and
@@ -1798,10 +2018,17 @@ model TaxReturn {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@unique([kind, clientId, personId, taxYear])
   @@index([kind, taxYear, status])
   @@index([clientId, kind])
   @@index([isActive, status])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 // ───────────────────────────── Tasks, calendar, reports ─────────────────────────────
@@ -1839,11 +2066,18 @@ model Task {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([assigneeId, status, dueDate])
   @@index([clientId])
   @@index([linkedType, linkedId])
   @@index([isActive, status, dueDate])
   @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// An appointment on the office calendar: a meeting, a team event or a reminder to oneself. Dates that come from other records (contract ends, deadlines, tasks, inspections, holidays)
@@ -1877,9 +2111,16 @@ model CalendarEvent {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([startsOn, endsOn, isActive])
   @@index([clientId])
   @@index([reminderMinutes, reminderSentAt, startsOn])
+  @@index([deletedAt])
+  @@index([deletionId])
 }
 
 /// A saved way of exporting a report: which report, the choices made on its screen (period, filters), the columns to keep and the file format. Shared by the whole office.
@@ -1900,5 +2141,33 @@ model ExportPreset {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  /// Deleted (soft): hidden everywhere in the app, kept in the database; the rows deleted together share `deletionId` (a `Deletion`, which can restore them).
+  deletedAt   DateTime?
+  deletedById String?
+  deletionId  String?
+
   @@index([reportKey])
+  @@index([deletedAt])
+  @@index([deletionId])
+}
+
+/// One delete: a record and everything that went with it (its workers, contracts, documents …). The rows themselves stay, marked with this id; restoring the deletion
+/// brings them back. Values that must be unique (a client number, an e-mail address, a code) are freed while deleted — the snapshot holds what to put back.
+model Deletion {
+  id           String    @id @default(cuid())
+  /// What was deleted (`client`, `employee`, `contract` …) and which one.
+  entityType   String
+  entityId     String
+  label        String    @default("")
+  /// How many rows of each table went with it: `{ "Client": 1, "Employee": 4, "StoredFile": 12 }`.
+  counts       Json      @default("{}")
+  /// What to put back on a restore: the freed unique values `{ tombstones: { Model: { id: { field: value } } }, unique: [UniqueFieldValue rows] }`.
+  snapshot     Json      @default("{}")
+  deletedById  String?
+  deletedAt    DateTime  @default(now())
+  restoredAt   DateTime?
+  restoredById String?
+
+  @@index([entityType, entityId])
+  @@index([deletedAt])
 }

@@ -19,15 +19,20 @@ import {
   PDFTextField,
   rgb,
   type PDFField,
+  type PDFFont,
+  type PDFPage,
 } from 'pdf-lib';
+import { readLayout } from './pdf-layout.js';
 import {
   PdfError,
+  type PdfBox,
   type PdfFieldInfo,
   type PdfFieldKind,
   type PdfFieldValue,
   type PdfFillOptions,
   type PdfFillResult,
   type PdfFormInfo,
+  type PdfPageLayout,
   type PdfPart,
   type PdfTextBlock,
 } from './pdf.types.js';
@@ -72,23 +77,55 @@ export class PdfService {
 
     const fields = form.getFields().map((field): PdfFieldInfo => {
       const kind = this.kindOf(field);
+      const page = this.pageOf(field, pageOfRef);
       return {
         name: field.getName(),
         kind,
-        page: this.pageOf(field, pageOfRef),
+        page,
         options: field instanceof PDFRadioGroup || field instanceof PDFDropdown || field instanceof PDFOptionList ? this.safeOptions(field) : [],
         maxLength: field instanceof PDFTextField ? (field.getMaxLength() ?? null) : null,
         multiline: field instanceof PDFTextField ? field.isMultiline() : false,
         readOnly: field.isReadOnly(),
         tooltip: this.tooltipOf(field),
+        box: page >= 0 ? this.boxOf(field, pages[page]!) : null,
+        placed: false,
+        cells: null,
+        context: '',
       };
     });
     return {
       pageCount: pages.length,
-      pages: pages.map(page => ({ width: Math.round(page.getWidth()), height: Math.round(page.getHeight()) })),
+      pages: pages.map(page => {
+        const crop = page.getCropBox();
+        return { width: Math.round(crop.width), height: Math.round(crop.height) };
+      }),
       fields,
       hasXfa: form.acroForm.dict.has(PDFName.of('XFA')),
     };
+  }
+
+  /** Where the first widget of a field is on its page, measured from the top left corner of the page as it is shown. */
+  private boxOf(field: PDFField, page: PDFPage): PdfBox | null {
+    try {
+      const widget = field.acroField.getWidgets()[0];
+      if (!widget) return null;
+      const rect = widget.getRectangle();
+      const crop = page.getCropBox();
+      const round = (value: number) => Math.round(value * 10) / 10;
+      return { x: round(rect.x - crop.x), y: round(crop.y + crop.height - (rect.y + rect.height)), width: round(rect.width), height: round(rect.height) };
+    } catch {
+      return null;
+    }
+  }
+
+  /** The lines of text and the places to write on the first pages — what a form without fields is read from. A PDF pdf.js cannot read gives no pages. */
+  async layout(bytes: Buffer, maxPages = 12): Promise<PdfPageLayout[]> {
+    try {
+      return await readLayout(bytes, maxPages);
+    } catch (error) {
+      this.logger.debug(`The layout of a PDF could not be read: ${(error as Error).message}`);
+      return [];
+    }
   }
 
   private kindOf(field: PDFField): PdfFieldKind {
@@ -142,8 +179,19 @@ export class PdfService {
     const unknown: string[] = [];
     const truncated: string[] = [];
     const failed: PdfFillResult['failed'] = [];
+    const placed = new Map((options.placed ?? []).filter(box => box.placed && box.box && box.page >= 0 && box.page < doc.getPageCount()).map(box => [box.name, box]));
     for (const [name, value] of Object.entries(values)) {
       if (value === null) continue;
+      const box = placed.get(name);
+      if (box) {
+        try {
+          this.write(doc.getPage(box.page), box, value, font, truncated);
+        } catch (error) {
+          this.logger.debug(`Box ${name} could not be written: ${(error as Error).message}`);
+          failed.push({ name, reason: 'error' });
+        }
+        continue;
+      }
       const field = form.getFieldMaybe(name);
       if (!field) {
         unknown.push(name);
@@ -173,6 +221,88 @@ export class PdfService {
     doc.setProducer('Nexra B.V.');
     doc.setModificationDate(new Date());
     return { bytes: Buffer.from(await doc.save()), unknown, truncated, failed };
+  }
+
+  /**
+   * A value written onto the page in a placed box (the PDF has no field there): a cross in a tick box; in a row of letter boxes one character per box; otherwise one
+   * line of text made smaller until it fits (never below 6 pt), or — for a box that takes several lines — the words wrapped over the lines that fit. What does not fit
+   * is cut and reported.
+   */
+  private write(page: PDFPage, box: PdfFieldInfo, value: Exclude<PdfFieldValue, null>, font: PDFFont, truncated: string[]): void {
+    const area = box.box!;
+    const crop = page.getCropBox();
+    const left = crop.x + area.x;
+    const bottom = crop.y + crop.height - area.y - area.height;
+    const ink = rgb(0.05, 0.05, 0.1);
+    // Capital letters are about 0.7 of the size high: this puts a line of text in the middle of the box.
+    const baselineFor = (size: number) => bottom + (area.height - size * 0.7) / 2;
+
+    if (box.kind === 'checkbox') {
+      const on = typeof value === 'boolean' ? value : Array.isArray(value) ? value.length > 0 : /^(1|true|yes|ja|x|on)$/i.test(value.trim());
+      if (!on) return;
+      const size = Math.max(6, Math.min(area.width, area.height) * 0.9);
+      page.drawText('X', { x: left + (area.width - font.widthOfTextAtSize('X', size)) / 2, y: baselineFor(size), size, font, color: ink });
+      return;
+    }
+
+    const text = (Array.isArray(value) ? value.join(', ') : typeof value === 'boolean' ? (value ? 'X' : '') : value).replace(/\s+/g, ' ').trim();
+    if (!text) return;
+
+    if (box.cells && box.cells > 1) {
+      const characters = Array.from(text.replace(/\s/g, ''));
+      if (characters.length > box.cells) truncated.push(box.name);
+      const cell = area.width / box.cells;
+      const size = Math.max(6, Math.min(area.height * 0.72, cell * 1.05, 14));
+      characters.slice(0, box.cells).forEach((character, index) => {
+        page.drawText(character, { x: left + index * cell + (cell - font.widthOfTextAtSize(character, size)) / 2, y: baselineFor(size), size, font, color: ink });
+      });
+      return;
+    }
+
+    const padding = Math.min(3, area.width * 0.05);
+    const room = area.width - padding * 2;
+    if (box.multiline && area.height >= 22) {
+      const size = 9;
+      const lead = size * 1.25;
+      const rows = Math.max(1, Math.floor((area.height - 2) / lead));
+      const lines = this.wrap(font, text, size, room);
+      if (lines.length > rows) truncated.push(box.name);
+      lines.slice(0, rows).forEach((line, index) => page.drawText(line, { x: left + padding, y: bottom + area.height - 2 - size * 0.9 - index * lead, size, font, color: ink }));
+      return;
+    }
+    let size = Math.max(6, Math.min(10, area.height * 0.72));
+    while (size > 6 && font.widthOfTextAtSize(text, size) > room) size -= 0.5;
+    let line = text;
+    if (font.widthOfTextAtSize(line, size) > room) {
+      while (line.length > 1 && font.widthOfTextAtSize(line, size) > room) line = line.slice(0, -1);
+      truncated.push(box.name);
+    }
+    page.drawText(line, { x: left + padding, y: baselineFor(size), size, font, color: ink });
+  }
+
+  /** A text broken into lines that fit the width, at spaces where possible. */
+  private wrap(font: PDFFont, text: string, size: number, width: number): string[] {
+    const lines: string[] = [];
+    let current = '';
+    for (const word of text.split(' ')) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (font.widthOfTextAtSize(candidate, size) <= width) {
+        current = candidate;
+        continue;
+      }
+      if (current) lines.push(current);
+      // A word longer than the line is cut over several lines.
+      let rest = word;
+      while (font.widthOfTextAtSize(rest, size) > width && rest.length > 1) {
+        let cut = rest;
+        while (cut.length > 1 && font.widthOfTextAtSize(cut, size) > width) cut = cut.slice(0, -1);
+        lines.push(cut);
+        rest = rest.slice(cut.length);
+      }
+      current = rest;
+    }
+    if (current) lines.push(current);
+    return lines;
   }
 
   private put(field: PDFField, value: Exclude<PdfFieldValue, null>, truncated: string[]): 'option' | 'kind' | null {

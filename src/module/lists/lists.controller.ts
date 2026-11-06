@@ -3,6 +3,8 @@ import { Locale, type AppLocale } from '../../common/decorators/locale.decorator
 import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
 import { CreateListDto, CreateListItemDto, ReorderItemsDto, UpdateListDto, UpdateListItemDto } from './dto/list.dto.js';
 import { ListsService } from './lists.service.js';
+import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
+import type { AuthenticatedUser } from '../../common/types/authenticated-user.js';
 
 /** Settings → Lists. */
 @Controller('lists')
@@ -33,10 +35,11 @@ export class ListsController {
     return this.lists.updateList(key, dto, locale);
   }
 
-  @RequirePermission('settings.edit')
+  /** Deletes a list the office made (soft) — not a built-in one, and not while a form uses it. */
+  @RequirePermission('settings.remove')
   @Delete(':key')
-  remove(@Param('key') key: string) {
-    return this.lists.deleteList(key);
+  remove(@Param('key') key: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.lists.deleteList(key, user);
   }
 
   @RequirePermission('settings.edit')

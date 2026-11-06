@@ -7,6 +7,7 @@ import type { AuthenticatedUser } from '../../common/types/authenticated-user.js
 import { ExportsService } from '../../lib/exports/exports.service.js';
 import { InviteUserDto, SetUserStatusDto, UpdateUserDto, UserListQuery } from './dto/user.dto.js';
 import { UsersService } from './users.service.js';
+import { DeletionService } from '../deletion/deletion.service.js';
 
 @Controller('users')
 @RequirePermission('users.view')
@@ -14,6 +15,7 @@ export class UsersController {
   constructor(
     private readonly users: UsersService,
     private readonly exports: ExportsService,
+    private readonly deletion: DeletionService,
   ) {}
 
   /** `meta.stats` (with `?stats=true`) are the counters above the list: total, active, invited, disabled, two-step, active this week. */
@@ -84,10 +86,11 @@ export class UsersController {
     return this.users.resetTwoFactor(id, actor);
   }
 
-  @RequirePermission('users.delete')
+  /** Deletes an account (soft): it can no longer sign in and is gone from the app; its work stays in the history. Never yourself or the last owner. */
+  @RequirePermission('users.remove')
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() actor: AuthenticatedUser) {
-    return this.users.remove(id, actor);
+    return this.deletion.delete('user', id, actor);
   }
 }
 

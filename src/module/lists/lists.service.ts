@@ -3,7 +3,10 @@ import type { AppLocale } from '../../common/decorators/locale.decorator.js';
 import type { List, ListItem } from '../../generated/prisma/client.js';
 import { AuditService } from '../../lib/audit/audit.service.js';
 import { PrismaService } from '../../lib/database/prisma.service.js';
+import { ALIVE } from '../../lib/database/soft-delete.js';
 import type { CreateListDto, CreateListItemDto, UpdateListDto, UpdateListItemDto } from './dto/list.dto.js';
+import { DeletionService } from '../deletion/deletion.service.js';
+import type { AuthenticatedUser } from '../../common/types/authenticated-user.js';
 
 /** `Rechtsvorm (BV)` → `rechtsvorm_bv` — a stable code from a name. */
 export const toCode = (name: string): string =>
@@ -17,6 +20,7 @@ export const toCode = (name: string): string =>
 const localized = (locale: AppLocale, nl: string, en: string) => (locale === 'en' ? en : nl);
 
 const serializeItem = (item: ListItem, locale: AppLocale) => ({
+  id: item.id,
   code: item.code,
   name: localized(locale, item.nameNl, item.nameEn),
   names: { nl: item.nameNl, en: item.nameEn },
@@ -28,7 +32,8 @@ const serializeItem = (item: ListItem, locale: AppLocale) => ({
 
 /**
  * Pick-lists and status lookups: one table pair for every fixed list in the app. Records store the item `code`; screens ask for the
- * names in the person's language. Items are never deleted — they are switched off (the history keeps pointing at them).
+ * names in the person's language. An item is switched off to keep it for the history; one the office added itself can also be deleted (soft — records
+ * that still hold its code then show the code).
  */
 @Injectable()
 export class ListsService {
@@ -38,6 +43,7 @@ export class ListsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly deletion: DeletionService,
   ) {}
 
   registerUsageCheck(check: (key: string) => Promise<string | null>): void {
@@ -47,7 +53,7 @@ export class ListsService {
   /* ── Reading ──────────────────────────────────────────────────────────────────────────────────────────────────── */
 
   async overview(locale: AppLocale) {
-    const lists = await this.prisma.list.findMany({ orderBy: [{ kind: 'asc' }, { nameNl: 'asc' }], include: { items: { select: { isActive: true } } } });
+    const lists = await this.prisma.list.findMany({ orderBy: [{ kind: 'asc' }, { nameNl: 'asc' }], include: { items: { where: ALIVE, select: { isActive: true } } } });
     return lists.map(list => ({
       key: list.key,
       name: localized(locale, list.nameNl, list.nameEn),
@@ -68,7 +74,7 @@ export class ListsService {
 
   /** Several lists at once, active and inactive items (a record may still carry a switched-off value), in the person's language. */
   async lookups(keys: string[], locale: AppLocale) {
-    const lists = await this.prisma.list.findMany({ where: { key: { in: keys } }, include: { items: { orderBy: [{ sortOrder: 'asc' }, { nameNl: 'asc' }] } } });
+    const lists = await this.prisma.list.findMany({ where: { key: { in: keys } }, include: { items: { where: ALIVE, orderBy: [{ sortOrder: 'asc' }, { nameNl: 'asc' }] } } });
     return Object.fromEntries(lists.map(list => [list.key, { kind: list.kind, items: list.items.map(item => serializeItem(item, locale)) }]));
   }
 
@@ -86,7 +92,7 @@ export class ListsService {
     if (await this.prisma.list.findUnique({ where: { key } })) throw this.invalid({ nameEn: 'validation.alreadyExists' });
     const list = await this.prisma.list.create({
       data: { key, nameNl: dto.nameNl.trim(), nameEn: dto.nameEn.trim(), descriptionNl: dto.descriptionNl?.trim() ?? '', descriptionEn: dto.descriptionEn?.trim() ?? '', kind: 'picklist', isSystem: false, allowNewItems: true },
-      include: { items: true },
+      include: { items: { where: ALIVE } },
     });
     await this.audit.log({ action: 'created', entityType: 'list', entityId: list.key, entityLabel: list.nameEn });
     return this.serializeList(list, locale);
@@ -100,7 +106,7 @@ export class ListsService {
       ...(dto.descriptionNl !== undefined && { descriptionNl: dto.descriptionNl.trim() }),
       ...(dto.descriptionEn !== undefined && { descriptionEn: dto.descriptionEn.trim() }),
     };
-    const updated = await this.prisma.list.update({ where: { id: list.id }, data, include: { items: { orderBy: [{ sortOrder: 'asc' }] } } });
+    const updated = await this.prisma.list.update({ where: { id: list.id }, data, include: { items: { where: ALIVE, orderBy: [{ sortOrder: 'asc' }] } } });
     const diff = AuditService.changes(
       { nameNl: list.nameNl, nameEn: list.nameEn, descriptionNl: list.descriptionNl, descriptionEn: list.descriptionEn },
       { nameNl: updated.nameNl, nameEn: updated.nameEn, descriptionNl: updated.descriptionNl, descriptionEn: updated.descriptionEn },
@@ -109,16 +115,15 @@ export class ListsService {
     return this.serializeList(updated, locale);
   }
 
-  async deleteList(key: string) {
+  /** Deletes a list the office made (soft, with its items), unless a form still uses it. */
+  async deleteList(key: string, user: AuthenticatedUser) {
     const list = await this.findOrThrow(key);
     if (list.isSystem) throw new ConflictException({ code: 'system_list', message: 'Built-in lists cannot be deleted.' });
     for (const check of this.usageChecks) {
       const reason = await check(key);
       if (reason) throw new ConflictException({ code: 'list_in_use', message: `This list is used by ${reason}.`, details: { usedBy: reason } });
     }
-    await this.prisma.list.delete({ where: { id: list.id } });
-    await this.audit.log({ action: 'deleted', entityType: 'list', entityId: key, entityLabel: list.nameEn });
-    return { key };
+    return { key, ...(await this.deletion.delete('list', list.id, user)) };
   }
 
   /* ── Items ────────────────────────────────────────────────────────────────────────────────────────────────────── */
@@ -180,7 +185,7 @@ export class ListsService {
   /* ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────── */
 
   private async findOrThrow(key: string): Promise<List & { items: ListItem[] }> {
-    const list = await this.prisma.list.findUnique({ where: { key }, include: { items: { orderBy: [{ sortOrder: 'asc' }, { nameNl: 'asc' }] } } });
+    const list = await this.prisma.list.findUnique({ where: { key }, include: { items: { where: ALIVE, orderBy: [{ sortOrder: 'asc' }, { nameNl: 'asc' }] } } });
     if (!list) throw new NotFoundException({ code: 'not_found', message: 'List not found' });
     return list;
   }

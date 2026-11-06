@@ -65,19 +65,9 @@ export class ClientFoldersService {
   }
 
   /** Switches an empty folder off (folders with files or sub-folders stay). */
-  async remove(client: Client, folderId: string) {
-    const folder = await this.prisma.folder.findFirst({ where: { id: folderId, clientId: client.id, isActive: true } });
-    if (!folder) throw new NotFoundException({ code: 'not_found', message: 'Folder not found' });
-    if (!folder.parentId) throw new ConflictException({ code: 'folder_is_root', message: 'The main folder of a client cannot be removed.' });
-    if (folder.employeeId) throw new ConflictException({ code: 'folder_follows_worker', message: 'The folder of an employee stays with the employee.' });
-    const [files, children] = await Promise.all([
-      this.prisma.storedFile.count({ where: { folderId: folder.id, isActive: true } }),
-      this.prisma.folder.count({ where: { parentId: folder.id, isActive: true } }),
-    ]);
-    if (files || children) throw new ConflictException({ code: 'folder_not_empty', message: 'Empty the folder first.', details: { files, folders: children } });
-    await this.prisma.folder.update({ where: { id: folder.id }, data: { isActive: false } });
-    await this.audit.log({ action: 'deactivated', entityType: 'folder', entityId: folder.id, entityLabel: `${displayLabel(client)} / ${folder.name}` });
-    return { id: folder.id };
+  /** Whether the folder is one of this client's. */
+  async belongsTo(client: Client, folderId: string): Promise<boolean> {
+    return Boolean(await this.prisma.folder.findFirst({ where: { id: folderId, clientId: client.id }, select: { id: true } }));
   }
 
   /** The cleaned name, unique among the folders next to it. */

@@ -17,6 +17,7 @@ import { DocumentTypesService } from '../document-settings/document-types.servic
 import type { FormExportQuery, FormListQuery, FormStatusDto, SaveFormDto } from './dto/official-forms.dto.js';
 import { isFillable, readFields } from './form-fields.js';
 import { readMapping } from './form-mapping.js';
+import { readSetup, setupView } from './form-setup.js';
 import { DEFAULT_FORM_DOC_TYPE, FORM_NAME_PATTERN_DEFAULT, OFFICIAL_FORM_ENTITY, PENDING_STATUSES } from './official-forms.constants.js';
 
 type Row = OfficialForm & { recipient: AddressBookEntry | null; versions: OfficialFormVersion[] };
@@ -34,8 +35,8 @@ const slug = (value: string): string =>
     .slice(0, 60);
 
 /**
- * The library of official PDF forms: what each form is called (in both languages), the code printed on it, where it goes, who it is about, how its filled file is named
- * and filed, and its editions (the PDFs). A form is switched off, never deleted: what was filled in with it stays in the log.
+ * The library of the office's PDF forms: what each form is called (in both languages), the code printed on it, where it goes, who it is about, how its filled file is
+ * named and filed, and its editions (the PDFs the office uploaded). A form is switched off, never deleted: what was filled in with it stays in the log.
  */
 @Injectable()
 export class OfficialFormsService {
@@ -56,6 +57,7 @@ export class OfficialFormsService {
   static versionSummary(version: OfficialFormVersion) {
     const fields = readFields(version.fields);
     const mapping = readMapping(version.mapping);
+    const setup = readSetup(version.setup);
     return {
       id: version.id,
       version: version.version,
@@ -64,7 +66,9 @@ export class OfficialFormsService {
       pageCount: version.pageCount,
       fields: fields.filter(isFillable).length,
       mapped: mapping.filter(entry => entry.source !== null && fields.some(field => field.name === entry.pdfField)).length,
-      isSample: version.isSample,
+      /** `fields`: the PDF has fields of its own; `flat`: it has none, its answers are written onto the page in placed boxes. */
+      mode: fields.some(field => !field.placed && isFillable(field)) ? 'fields' : 'flat',
+      setup: setupView(setup),
       note: version.note,
       createdAt: version.createdAt.toISOString(),
     };
@@ -83,7 +87,6 @@ export class OfficialFormsService {
       descriptionNl: row.descriptionNl,
       descriptionEn: row.descriptionEn,
       authorityCode: row.authorityCode,
-      officialUrl: row.officialUrl,
       subject: row.subject,
       periodKind: row.periodKind,
       recipient: row.recipient ? { id: row.recipient.id, name: row.recipient.name, lines: addressLines(row.recipient, locale), isActive: row.recipient.isActive } : null,
@@ -170,14 +173,6 @@ export class OfficialFormsService {
     const nameEn = dto.nameEn.trim();
     if (!nameNl) problems.nameNl = 'validation.required';
     if (!nameEn) problems.nameEn = 'validation.required';
-    const officialUrl = (dto.officialUrl ?? '').trim();
-    if (officialUrl) {
-      try {
-        if (!/^https?:$/.test(new URL(officialUrl).protocol)) problems.officialUrl = 'validation.invalidUrl';
-      } catch {
-        problems.officialUrl = 'validation.invalidUrl';
-      }
-    }
     const recipientId = dto.recipientId || null;
     if (recipientId && !(await this.prisma.addressBookEntry.findFirst({ where: { id: recipientId, isActive: true }, select: { id: true } }))) problems.recipientId = 'validation.selectOption';
     const docType = (dto.docType ?? DEFAULT_FORM_DOC_TYPE).trim() || DEFAULT_FORM_DOC_TYPE;
@@ -194,7 +189,6 @@ export class OfficialFormsService {
       descriptionNl: (dto.descriptionNl ?? '').trim(),
       descriptionEn: (dto.descriptionEn ?? '').trim(),
       authorityCode: (dto.authorityCode ?? '').trim(),
-      officialUrl,
       subject: dto.subject ?? 'client',
       periodKind: dto.periodKind ?? 'none',
       recipientId,
@@ -209,9 +203,16 @@ export class OfficialFormsService {
 
   async create(dto: SaveFormDto, user: AuthenticatedUser, locale: AppLocale) {
     const values = await this.clean(dto);
-    const code = dto.code || slug(values.nameEn) || slug(values.nameNl);
-    if (!code) throw validationFailed({ code: 'validation.invalid' });
-    if (await this.prisma.officialForm.findUnique({ where: { code }, select: { id: true } })) throw new ConflictException({ code: 'form_code_taken', message: 'There is a form with this code already.', fields: { code: 'validation.alreadyExists' } });
+    let code = dto.code || slug(values.nameEn) || slug(values.nameNl) || 'form';
+    if (await this.prisma.withDeleted.officialForm.findUnique({ where: { code }, select: { id: true } })) {
+      // A code that was typed must be free; one made from the name gets a number (two forms may have the same name).
+      if (dto.code) throw new ConflictException({ code: 'form_code_taken', message: 'There is a form with this code already.', fields: { code: 'validation.alreadyExists' } });
+      const base = code.slice(0, 54);
+      for (let number = 2; ; number += 1) {
+        code = `${base}_${number}`;
+        if (!(await this.prisma.withDeleted.officialForm.findUnique({ where: { code }, select: { id: true } }))) break;
+      }
+    }
     const count = await this.prisma.officialForm.count();
     const row = await this.prisma.officialForm.create({ data: { code, ...values, sortOrder: (count + 1) * 10, createdById: user.id } });
     await this.audit.log({ action: 'created', entityType: OFFICIAL_FORM_ENTITY, entityId: row.id, entityLabel: row.nameNl, after: { code, ...values } });

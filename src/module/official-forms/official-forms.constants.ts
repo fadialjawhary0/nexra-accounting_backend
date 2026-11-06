@@ -1,5 +1,5 @@
 /*
- * The library of official PDF forms (Melding loonheffingen, Verzoek deblokkering G-rekening …), filling them in from the records, and the log of what was sent.
+ * The library of the office's own PDF forms (Melding loonheffingen, Verzoek deblokkering G-rekening …), filling them in from the records, and the log of what was sent.
  * Permission area: `official_forms` (see address-book.constants.ts, where the area key and the address book live).
  */
 
@@ -22,6 +22,19 @@ export const PENDING_STATUSES: readonly string[] = ['prepared', 'sent'];
 
 /** The fields of a PDF that a person can fill in. */
 export const FILLABLE_KINDS = ['text', 'checkbox', 'radio', 'dropdown', 'list'] as const;
+
+/** What a box placed on the page of a PDF without fields can be: a text, or a tick. */
+export const PLACED_KINDS = ['text', 'checkbox'] as const;
+
+/** The background job that sets a new PDF up with the AI (links its fields, or finds the boxes of a PDF without fields). */
+export const QUEUE_FORM_SETUP = 'official-form-setup';
+
+/** The states of that set-up (`OfficialFormVersion.setup.status`). `off`: the AI was not available, the person links or places by hand. */
+export const SETUP_STATUSES = ['none', 'waiting', 'running', 'done', 'failed', 'off'] as const;
+export type SetupStatus = (typeof SETUP_STATUSES)[number];
+
+/** The pages of a PDF without fields that are read for its boxes (the rest are placed by hand). */
+export const SETUP_MAX_PAGES = 8;
 
 /** The reminder that says "nothing heard yet" for a form that was sent. */
 export const FORM_FOLLOW_UP_TRIGGER = 'form_follow_up';

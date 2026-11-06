@@ -7,6 +7,7 @@ import type { AuthenticatedUser } from '../../common/types/authenticated-user.js
 import { ExportsService } from '../../lib/exports/exports.service.js';
 import { CreatePresetDto, UpdatePresetDto } from './dto/reports.dto.js';
 import { ReportsService } from './reports.service.js';
+import { DeletionService } from '../deletion/deletion.service.js';
 
 /** The reports centre. A report needs `reports.view` and the permission area it is about; files need `reports.export`. */
 @Controller('reports')
@@ -15,6 +16,7 @@ export class ReportsController {
   constructor(
     private readonly reports: ReportsService,
     private readonly exports: ExportsService,
+    private readonly deletion: DeletionService,
   ) {}
 
   /** The reports this person may open, with the inputs each one asks for. */
@@ -41,11 +43,12 @@ export class ReportsController {
     return this.reports.updatePreset(id, dto, user);
   }
 
-  @RequirePermission('reports.export')
+  /** Deletes a saved export preset (soft). */
+  @RequirePermission('reports.remove')
   @HttpCode(200)
   @Delete('presets/:id')
   removePreset(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.reports.removePreset(id, user);
+    return this.deletion.delete('export_preset', id, user);
   }
 
   /** The report as a file: `?format=xlsx|pdf|docx`, the report's inputs, `columns=a,b` to keep some columns, `preset=<id>` to start from a saved preset. */

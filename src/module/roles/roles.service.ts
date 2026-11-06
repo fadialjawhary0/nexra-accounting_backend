@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.js';
 import type { Role } from '../../generated/prisma/client.js';
 import { AuditService } from '../../lib/audit/audit.service.js';
@@ -107,16 +107,6 @@ export class RolesService {
     );
     if (Object.keys(changed.after).length) await this.audit.log({ action: 'updated', entityType: 'role', entityId: role.id, entityLabel: updated.name, before: changed.before, after: changed.after });
     return serialize(updated, await this.countFor(id));
-  }
-
-  async remove(id: string) {
-    const role = await this.findOrThrow(id);
-    if (role.isSystem) throw new ConflictException({ code: 'system_role', message: 'Built-in roles cannot be deleted.' });
-    const members = await this.prisma.user.count({ where: { roleId: id } });
-    if (members) throw new ConflictException({ code: 'role_in_use', message: `${members} ${members === 1 ? 'person still has' : 'people still have'} the role “${role.name}”. Give them another role before deleting it.`, details: { members, name: role.name } });
-    await this.prisma.role.delete({ where: { id } });
-    await this.audit.log({ action: 'deleted', entityType: 'role', entityId: id, entityLabel: role.name });
-    return { id };
   }
 
   private async findOrThrow(id: string): Promise<Role> {

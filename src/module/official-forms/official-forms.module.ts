@@ -11,6 +11,7 @@ import { SearchModule } from '../search/search.module.js';
 import { OfficialFormSearchProvider } from './official-form-search.provider.js';
 import { FormAiService } from './form-ai.service.js';
 import { FormFillService } from './form-fill.service.js';
+import { FormSetupService } from './form-setup.service.js';
 import { FormSourcesService } from './form-sources.service.js';
 import { FormSubmissionsController } from './form-submissions.controller.js';
 import { FormSubmissionsService } from './form-submissions.service.js';
@@ -20,14 +21,15 @@ import { OfficialFormsController } from './official-forms.controller.js';
 import { OfficialFormsService } from './official-forms.service.js';
 
 /**
- * Official forms and post: the library of the tax office's PDF forms (Melding loonheffingen, Verzoek deblokkering G-rekening …) with a mapping from the records onto the
- * fields of each PDF, filling a form in for a client and filing it, the log of what was sent and what became of it, reading a photo or scan to fill gaps, and the
- * reminder that says "no answer yet". (The address book and the envelope labels are in `address-book`.)
+ * Official forms and post: the library of the office's own PDF forms (Melding loonheffingen, Verzoek deblokkering G-rekening …) — uploaded by the office and set up by
+ * the AI (its fields linked to the records, or for a PDF without fields the boxes placed on its pages) —, filling a form in for a client and filing it, the log of what
+ * was sent and what became of it, reading a photo or scan to fill gaps, and the reminder that says "no answer yet". (The address book and the envelope labels are in
+ * `address-book`.)
  */
 @Module({
   imports: [AddressBookModule, CalendarModule, DocumentSettingsModule, FilesModule, FormsModule, ListsModule, RemindersModule, SearchModule],
   controllers: [OfficialFormsController, FormSubmissionsController],
-  providers: [OfficialFormsService, OfficialFormVersionsService, FormSourcesService, FormFillService, FormSubmissionsService, FormAiService, OfficialFormRemindersService, ImportLookupsService, OfficialFormSearchProvider],
+  providers: [OfficialFormsService, OfficialFormVersionsService, FormSourcesService, FormFillService, FormSetupService, FormSubmissionsService, FormAiService, OfficialFormRemindersService, ImportLookupsService, OfficialFormSearchProvider],
   exports: [OfficialFormsService, FormSubmissionsService],
 })
 export class OfficialFormsModule {}

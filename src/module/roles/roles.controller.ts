@@ -3,12 +3,16 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.js';
 import { CreateRoleDto, UpdateRoleDto } from './dto/role.dto.js';
+import { DeletionService } from '../deletion/deletion.service.js';
 import { RolesService } from './roles.service.js';
 
 @Controller('roles')
 @RequirePermission('users.view')
 export class RolesController {
-  constructor(private readonly roles: RolesService) {}
+  constructor(
+    private readonly roles: RolesService,
+    private readonly deletion: DeletionService,
+  ) {}
 
   /** Every role (not paged) with how many people hold it. */
   @Get()
@@ -33,10 +37,11 @@ export class RolesController {
     return this.roles.update(id, dto, actor);
   }
 
-  @RequirePermission('users.delete')
+  /** Deletes a role (soft) — not a built-in one, and not while people hold it. */
+  @RequirePermission('users.remove')
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.roles.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.deletion.delete('role', id, user);
   }
 }
 

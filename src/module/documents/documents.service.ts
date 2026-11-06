@@ -337,12 +337,6 @@ export class DocumentsService {
     return this.one(id, user, locale);
   }
 
-  /** Switches the document off (nothing is deleted); an older version takes its place. */
-  async remove(id: string, user: AuthenticatedUser) {
-    await this.editable(id, user);
-    return this.files.deactivate(id, user);
-  }
-
   /** Brings a removed document back (as the current version when there is none). */
   async restore(id: string, user: AuthenticatedUser, locale: AppLocale) {
     const file = await this.readable(id, user);

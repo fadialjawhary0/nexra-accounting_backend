@@ -257,16 +257,6 @@ export class CalendarService implements OnModuleInit {
     return serializeHoliday(updated, locale);
   }
 
-  async remove(id: string) {
-    const holiday = await this.prisma.holiday.findUnique({ where: { id } });
-    if (!holiday) throw new NotFoundException({ code: 'not_found', message: 'Holiday not found' });
-    if (holiday.kind === 'official') throw new ConflictException({ code: 'official_holiday', message: 'Official holidays cannot be deleted — switch them off instead.' });
-    await this.prisma.holiday.delete({ where: { id } });
-    await this.reload();
-    await this.audit.log({ action: 'deleted', entityType: 'holiday', entityId: id, entityLabel: `${formatDay(holiday.date)} ${holiday.nameEn}` });
-    return { id };
-  }
-
   /** Generates a year that is missing (e.g. further ahead than the nightly job looks). */
   async generateYear(year: number) {
     const created = await this.ensureYear(year);

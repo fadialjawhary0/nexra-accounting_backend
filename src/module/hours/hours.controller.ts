@@ -24,6 +24,7 @@ import {
 import { HoursService } from './hours.service.js';
 import { PeriodLocksService } from './period-locks.service.js';
 import { SurchargeRulesService } from './surcharge-rules.service.js';
+import { DeletionService } from '../deletion/deletion.service.js';
 
 @Controller('hours')
 @RequirePermission('hours.view')
@@ -33,6 +34,7 @@ export class HoursController {
     private readonly locks: PeriodLocksService,
     private readonly surcharges: SurchargeRulesService,
     private readonly exports: ExportsService,
+    private readonly deletion: DeletionService,
   ) {}
 
   /**
@@ -155,9 +157,10 @@ export class HoursController {
     return this.surcharges.update(id, dto);
   }
 
-  @RequirePermission('settings.edit')
+  /** Deletes a surcharge rule (soft). */
+  @RequirePermission('settings.remove')
   @Delete('surcharges/:id')
-  surchargeRemove(@Param('id') id: string) {
-    return this.surcharges.remove(id);
+  surchargeRemove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.deletion.delete('surcharge_rule', id, user);
   }
 }

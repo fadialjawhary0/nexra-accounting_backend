@@ -14,10 +14,11 @@ import { TaxesModule } from '../taxes/taxes.module.js';
 import { ReportsCatalogService } from './reports-catalog.service.js';
 import { ReportsController } from './reports.controller.js';
 import { ReportsService } from './reports.service.js';
+import { DeletionModule } from '../deletion/deletion.module.js';
 
 /** The reports centre (Rapporten): every list and overview in one place, with a period, filters, and Excel / PDF / Word files — and saved export presets. */
 @Module({
-  imports: [ClientsModule, ContractsModule, DocumentsFeatureModule, EmployeesModule, HoursModule, InspectionsModule, InvoicesModule, OfficialFormsModule, ReconciliationModule, SalaryStatementsModule, TasksModule, TaxesModule],
+  imports: [DeletionModule, ClientsModule, ContractsModule, DocumentsFeatureModule, EmployeesModule, HoursModule, InspectionsModule, InvoicesModule, OfficialFormsModule, ReconciliationModule, SalaryStatementsModule, TasksModule, TaxesModule],
   controllers: [ReportsController],
   providers: [ReportsCatalogService, ReportsService],
 })

@@ -11,7 +11,8 @@ export type FuzzyTable = 'Client' | 'Person' | 'Employee';
 export async function fuzzyIds(prisma: PrismaService, table: FuzzyTable, folded: string, limit: number): Promise<string[]> {
   if (folded.length < 4) return [];
   const rows = await prisma.$queryRaw<Array<{ id: string }>>(
-    Prisma.sql`SELECT "id" FROM ${Prisma.raw(`"${table}"`)} WHERE ${folded} <% "searchText" ORDER BY word_similarity(${folded}, "searchText") DESC LIMIT ${limit}`,
+    // Deleted clients and workers are left out here already (soft delete), so they do not take the places of the best matches.
+    Prisma.sql`SELECT "id" FROM ${Prisma.raw(`"${table}"`)} WHERE ${folded} <% "searchText" ${table === 'Person' ? Prisma.empty : Prisma.sql`AND "deletedAt" IS NULL`} ORDER BY word_similarity(${folded}, "searchText") DESC LIMIT ${limit}`,
   );
   return rows.map(row => row.id);
 }

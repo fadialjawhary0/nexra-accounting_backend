@@ -559,7 +559,8 @@ export class EmployeesService implements OnModuleInit {
     const usable = (field: FieldDef) => field.active && !isEncryptedField(field) && canViewField(field, matrix);
     const byKey = (doc: FormDoc, predicate: (field: FieldDef) => boolean) => new Map(doc.fields.filter(field => usable(field) && predicate(field)).map(field => [field.key, field]));
     const filterable = { employee: byKey(docs.employee, field => field.flags.filter), person: byKey(docs.person, field => field.flags.filter) };
-    const conditions: Prisma.Sql[] = [];
+    // Deleted rows are hidden (soft delete): raw SQL does not go through the client's filter.
+    const conditions: Prisma.Sql[] = [Prisma.sql`e."deletedAt" IS NULL`];
 
     const statuses = splitList(query.status).filter(status => status === 'active' || status === 'stopped');
     if (statuses.length === 1) conditions.push(Prisma.sql`e."isActive" = ${statuses[0] === 'active'}`);
@@ -628,7 +629,7 @@ export class EmployeesService implements OnModuleInit {
     let expiring: number | null = null;
     if (keys.length) {
       const rows = await this.prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
-        SELECT count(*) AS "count" FROM "Employee" e JOIN "Person" p ON p."id" = e."personId" WHERE e."isActive" AND ${this.expiresSoon(keys)}`);
+        SELECT count(*) AS "count" FROM "Employee" e JOIN "Person" p ON p."id" = e."personId" WHERE e."isActive" AND e."deletedAt" IS NULL AND ${this.expiresSoon(keys)}`);
       expiring = Number(rows[0]?.count ?? 0);
     }
     return { total: active + stopped, active, stopped, clients: activeClients.length, documentsExpiring: expiring };

@@ -254,19 +254,6 @@ export class UsersService {
     return serializeUser(updated, EMPTY_WORKLOAD);
   }
 
-  /** Removes an account that never worked in the system (an unaccepted invitation). Anybody else is disabled, never deleted. */
-  async remove(id: string, actor: AuthenticatedUser) {
-    const user = await this.findOrThrow(id);
-    if (user.id === actor.id) throw new ConflictException({ code: 'cannot_delete_self', message: 'You cannot delete your own account.' });
-    if (await this.isLastActiveOwner(user)) throw new ConflictException({ code: 'last_owner', message: `${user.name} is the only active owner and cannot be deleted.`, details: { name: user.name } });
-    if (user.lastActiveAt) {
-      throw new ConflictException({ code: 'user_has_history', message: `${user.name} has worked in the system, so the account is kept for the history. Disable it instead.`, details: { name: user.name } });
-    }
-    await this.prisma.user.delete({ where: { id } });
-    await this.audit.log({ action: 'deleted', entityType: 'user', entityId: id, entityLabel: user.name, meta: { invitation: user.status === 'invited' } });
-    return { id };
-  }
-
   /* ── Help for people who are locked out ───────────────────────────────────────────────────────────────────────── */
 
   /** Signs the person out everywhere, makes them choose a new password at the next sign-in, and e-mails them a reset link. */

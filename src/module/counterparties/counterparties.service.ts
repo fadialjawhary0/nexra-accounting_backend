@@ -9,6 +9,7 @@ import { validationFailed } from '../../common/validation/failure.js';
 import type { Counterparty, Prisma } from '../../generated/prisma/client.js';
 import { AuditService } from '../../lib/audit/audit.service.js';
 import { PrismaService } from '../../lib/database/prisma.service.js';
+import { ALIVE } from '../../lib/database/soft-delete.js';
 import type { ExportTable } from '../../lib/exports/export.types.js';
 import { ExportsService } from '../../lib/exports/exports.service.js';
 import { valuesFor } from '../forms/field-access.js';
@@ -64,7 +65,7 @@ export class CounterpartiesService {
     const orderBy = toOrderBy(query.sort, ['name', 'kvk', 'createdAt'], [{ name: 'asc' }]) as Prisma.CounterpartyOrderByWithRelationInput[];
     const [total, rows, counts] = await Promise.all([
       this.prisma.counterparty.count({ where }),
-      this.prisma.counterparty.findMany({ where, orderBy, include: { _count: { select: { invoices: true } } }, ...toSkipTake(query) }),
+      this.prisma.counterparty.findMany({ where, orderBy, include: { _count: { select: { invoices: { where: ALIVE } } } }, ...toSkipTake(query) }),
       query.stats ? this.prisma.counterparty.groupBy({ by: ['isActive'], where: this.where({ search: query.search, status: 'all' }), _count: { _all: true } }) : Promise.resolve(null),
     ]);
     return paged(
@@ -74,7 +75,7 @@ export class CounterpartiesService {
   }
 
   private async rowOrThrow(id: string): Promise<Row> {
-    const row = await this.prisma.counterparty.findUnique({ where: { id }, include: { _count: { select: { invoices: true } } } });
+    const row = await this.prisma.counterparty.findUnique({ where: { id }, include: { _count: { select: { invoices: { where: ALIVE } } } } });
     if (!row) throw new NotFoundException({ code: 'not_found', message: 'Company not found' });
     return row;
   }
@@ -165,7 +166,7 @@ export class CounterpartiesService {
   async listTable(query: CounterpartyExportQuery, locale: AppLocale): Promise<ExportTable> {
     const where = this.where(query);
     this.exports.assertSize(await this.prisma.counterparty.count({ where }));
-    const rows = await this.prisma.counterparty.findMany({ where, orderBy: { name: 'asc' }, include: { _count: { select: { invoices: true } } } });
+    const rows = await this.prisma.counterparty.findMany({ where, orderBy: { name: 'asc' }, include: { _count: { select: { invoices: { where: ALIVE } } } } });
     const nl = locale === 'nl';
     return {
       title: nl ? 'Bedrijven (uitzendbureaus en inleners)' : 'Companies (staffing companies and hirers)',

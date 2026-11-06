@@ -33,6 +33,8 @@ export const AI_DEFINITIONS = {
   featureLetter: { type: 'bool', default: true, group: 'features' },
   featureMapping: { type: 'bool', default: true, group: 'features' },
   featureFormFill: { type: 'bool', default: true, group: 'features' },
+  /** Setting up an uploaded PDF form: linking its fields to the records, or finding where the answers go on a PDF without fields. */
+  featureFormSetup: { type: 'bool', default: true, group: 'features' },
   featureInspectionRequest: { type: 'bool', default: true, group: 'features' },
   /** The AI inbox of the dashboard: a message in a person's own words becomes tasks, appointments, workers … to confirm. */
   featureInbox: { type: 'bool', default: true, group: 'features' },
@@ -52,6 +54,7 @@ export const FEATURE_SETTING: Record<string, keyof typeof AI_DEFINITIONS | null>
   letter: 'featureLetter',
   mapping: 'featureMapping',
   form_fill: 'featureFormFill',
+  form_setup: 'featureFormSetup',
   inspection_request: 'featureInspectionRequest',
   inbox: 'featureInbox',
   test: null,

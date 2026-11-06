@@ -2,8 +2,11 @@
  * The catalogue of everything a role can be allowed to do: areas (a page or a module) × actions. The backend owns it;
  * `GET /api/permissions/catalog` hands it to the Roles page, and the guards check `@RequirePermission('area.action')`
  * against it. New areas are added here when their module is built.
+ *
+ * `delete` is the older "switch off / cancel" (a record stays, greyed); `remove` is **deleting** (06-11-2026, Ahmad's notes): the record — and what goes with it — disappears
+ * from the app and stays only in the database (soft delete, `module/deletion`). Only the owner's role has `remove` until somebody gives it to another role.
  */
-export const PERMISSION_ACTIONS = ['view', 'create', 'edit', 'delete', 'export', 'approve'] as const;
+export const PERMISSION_ACTIONS = ['view', 'create', 'edit', 'delete', 'export', 'approve', 'remove'] as const;
 export type PermissionAction = (typeof PERMISSION_ACTIONS)[number];
 
 /** `{ area: [actions] }` — an area is only present when its `view` action is. */
@@ -39,9 +42,9 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
   { key: 'admin', names: { nl: 'Beheer', en: 'Administration' } },
 ];
 
-const CRUD = ['view', 'create', 'edit', 'delete'] as const;
-const CRUD_EXPORT = ['view', 'create', 'edit', 'delete', 'export'] as const;
-const ALL = ['view', 'create', 'edit', 'delete', 'export', 'approve'] as const;
+const CRUD = ['view', 'create', 'edit', 'delete', 'remove'] as const;
+const CRUD_EXPORT = ['view', 'create', 'edit', 'delete', 'export', 'remove'] as const;
+const ALL = ['view', 'create', 'edit', 'delete', 'export', 'approve', 'remove'] as const;
 
 export const PERMISSION_AREAS: readonly PermissionArea[] = [
   { key: 'dashboard', group: 'workspace', actions: ['view'], names: { nl: 'Dashboard', en: 'Dashboard' } },
@@ -58,9 +61,9 @@ export const PERMISSION_AREAS: readonly PermissionArea[] = [
   /** Bulk imports: spreadsheets and the AI file queue. `create` = start an import, `edit` = change values in the review list and the saved column mappings, `delete` = cancel an import / remove a mapping, `approve` = save the results into the records (this also needs the right to create or change those records), `export` = download the report. */
   { key: 'imports', group: 'automation', actions: ALL, names: { nl: 'Importeren', en: 'Imports' } },
   /** Registering hours (the week grid). `approve` = close or reopen a period and change days that are closed (with a reason). */
-  { key: 'hours', group: 'money', actions: ALL, names: { nl: 'Uren', en: 'Hours' } },
+  { key: 'hours', group: 'money', actions: ['view', 'create', 'edit', 'delete', 'export', 'approve'], names: { nl: 'Uren', en: 'Hours' } },
   /** What is paid: salary statements show amounts. `delete` = cancel a statement. */
-  { key: 'salary_statements', group: 'money', actions: ['view', 'create', 'delete', 'export'], names: { nl: 'Loonstaten', en: 'Salary statements' } },
+  { key: 'salary_statements', group: 'money', actions: ['view', 'create', 'delete', 'export', 'remove'], names: { nl: 'Loonstaten', en: 'Salary statements' } },
   /** Invoices about hours (incoming from staffing companies, outgoing to the companies that used the workers), their companies, the reconciliation and the markup report. `approve` = issue an invoice / mark an incoming one as checked; `delete` = cancel or credit. */
   { key: 'invoices', group: 'money', actions: ALL, names: { nl: 'Facturen', en: 'Invoices' } },
   /** The library of official PDF forms (Melding loonheffingen, G-account forms …), filling them in, the log of sent forms and the address book for envelope labels. `create` = fill a form in, file it and make its label, mark it sent or dealt with; `edit` = change the library (upload a new edition, the mapping) and the address book; `delete` = switch a form or an address off, take an entry out of the log; `export` = download lists. */
@@ -71,10 +74,12 @@ export const PERMISSION_AREAS: readonly PermissionArea[] = [
   { key: 'inspections', group: 'taxes', actions: CRUD_EXPORT, names: { nl: 'Controles', en: 'Inspections' } },
   { key: 'drive', group: 'google', actions: CRUD, names: { nl: 'Google Drive', en: 'Google Drive' } },
   { key: 'mail', group: 'google', actions: CRUD, names: { nl: 'Gmail', en: 'Gmail' } },
-  { key: 'reports', group: 'automation', actions: ['view', 'export'], names: { nl: 'Rapporten', en: 'Reports' } },
+  /** `remove` = delete a saved export preset. */
+  { key: 'reports', group: 'automation', actions: ['view', 'export', 'remove'], names: { nl: 'Rapporten', en: 'Reports' } },
   { key: 'activity', group: 'admin', actions: ['view', 'export'], names: { nl: 'Activiteitenlogboek', en: 'Activity log' } },
   { key: 'users', group: 'admin', actions: CRUD_EXPORT, names: { nl: 'Gebruikers & rollen', en: 'Users & roles' } },
-  { key: 'settings', group: 'admin', actions: ['view', 'edit'], names: { nl: 'Instellingen', en: 'Settings' } },
+  /** `remove` = delete what the settings hold: list items, holidays, document types, folders, required documents, reminder rules, messages, surcharges, VAT steps, checklists. */
+  { key: 'settings', group: 'admin', actions: ['view', 'edit', 'remove'], names: { nl: 'Instellingen', en: 'Settings' } },
   /** Restricted data: fields the form builder marks as sensitive (BSN, IBAN, wages …). Without this, those values are never shown, listed or exported. */
   { key: 'personal_data', group: 'admin', actions: ['view', 'edit'], names: { nl: 'Gevoelige gegevens (BSN, IBAN, loon)', en: 'Sensitive data (BSN, IBAN, wages)' } },
 ];

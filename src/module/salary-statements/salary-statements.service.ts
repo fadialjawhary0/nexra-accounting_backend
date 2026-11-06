@@ -57,7 +57,7 @@ export class SalaryStatementsService {
     const [entries, withoutRate, workers] = await Promise.all([
       this.prisma.hourEntry.groupBy({ by: ['employeeId'], where: { employee: { clientId: query.clientId }, date: range }, _sum: { minutes: true }, _count: { _all: true } }),
       this.prisma.hourEntry.groupBy({ by: ['employeeId'], where: { employee: { clientId: query.clientId }, date: range, rate: null }, _count: { _all: true } }),
-      this.prisma.employee.findMany({ where: { clientId: query.clientId, hourEntries: { some: { date: range } } }, include: { person: true }, orderBy: [{ person: { lastName: 'asc' } }, { person: { firstName: 'asc' } }] }),
+      this.prisma.employee.findMany({ where: { clientId: query.clientId, hourEntries: { some: { date: range, deletedAt: null } } }, include: { person: true }, orderBy: [{ person: { lastName: 'asc' } }, { person: { firstName: 'asc' } }] }),
     ]);
     const ids = workers.map(worker => worker.id);
     const covered = ids.length

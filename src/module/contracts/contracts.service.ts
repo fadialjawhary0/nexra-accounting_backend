@@ -395,7 +395,7 @@ export class ContractsService implements OnModuleInit {
     const [groups, expiring, unsigned] = await Promise.all([
       this.prisma.contract.groupBy({ by: ['status'], _count: { _all: true } }),
       this.prisma.contract.count({ where: { status: 'active', endDate: { gte: parseDay(today), lte: parseDay(limit) } } }),
-      this.prisma.contract.count({ where: { status: 'active', documents: { none: { kind: 'signed', isActive: true } } } }),
+      this.prisma.contract.count({ where: { status: 'active', documents: { none: { kind: 'signed', isActive: true, deletedAt: null } } } }),
     ]);
     const counts = Object.fromEntries(CONTRACT_STATUSES.map(status => [status, groups.find(group => group.status === status)?._count._all ?? 0]));
     return { total: groups.reduce((sum, group) => sum + group._count._all, 0), ...counts, expiring, expiringDays: this.settings.get<number>(`${CONTRACTS_NAMESPACE}.expiringDays`), withoutScan: unsigned };
@@ -562,7 +562,8 @@ export class ContractsService implements OnModuleInit {
     const context: QueryContext = { alias: 'k', columns: CONTRACT_COLUMNS, locale, dateColumns: CONTRACT_DATE_COLUMNS };
     const usable = (field: FieldDef) => field.active && !isEncryptedField(field) && canViewField(field, matrix);
     const filterable = new Map(doc.fields.filter(field => usable(field) && field.flags.filter).map(field => [field.key, field]));
-    const conditions: Prisma.Sql[] = [];
+    // Deleted rows are hidden (soft delete): raw SQL does not go through the client's filter.
+    const conditions: Prisma.Sql[] = [Prisma.sql`k."deletedAt" IS NULL`];
 
     const statuses = splitList(query.status).filter(status => (CONTRACT_STATUSES as readonly string[]).includes(status));
     if (statuses.length) conditions.push(Prisma.sql`k."status" IN (${Prisma.join(statuses)})`);
