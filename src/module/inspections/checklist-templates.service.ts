@@ -156,7 +156,7 @@ export class ChecklistTemplatesService {
     const start = base || 'checklist';
     for (let number = 1; number < 100; number += 1) {
       const candidate = number === 1 ? start : `${start}_${number}`;
-      if (!(await this.prisma.checklistTemplate.findUnique({ where: { code: candidate }, select: { id: true } }))) return candidate;
+      if (!(await this.prisma.withDeleted.checklistTemplate.findUnique({ where: { code: candidate }, select: { id: true } }))) return candidate;
     }
     return `${start}_${Date.now()}`;
   }
@@ -167,7 +167,7 @@ export class ChecklistTemplatesService {
     const problems: Record<string, string> = {};
     if (!nameNl) problems.nameNl = 'validation.required';
     if (!nameEn) problems.nameEn = 'validation.required';
-    if (dto.code && (await this.prisma.checklistTemplate.findUnique({ where: { code: dto.code }, select: { id: true } }))) problems.code = 'validation.alreadyExists';
+    if (dto.code && (await this.prisma.withDeleted.checklistTemplate.findUnique({ where: { code: dto.code }, select: { id: true } }))) problems.code = 'validation.alreadyExists';
     if (Object.keys(problems).length) throw validationFailed(problems);
     const inspectionTypes = await this.checkedTypes(dto.inspectionTypes);
     const code = dto.code ?? (await this.freeCode(fold(nameEn).replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 36)));

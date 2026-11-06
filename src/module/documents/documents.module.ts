@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { DeletionModule } from '../deletion/deletion.module.js';
 import { DocumentSettingsModule } from '../document-settings/document-settings.module.js';
 import { EmployeesModule } from '../employees/employees.module.js';
 import { FilesModule } from '../files/files.module.js';
@@ -20,7 +21,7 @@ import { DocumentsService } from './documents.service.js';
  * and the reminders about documents that expire. (The settings — types, folders, required documents — are in `document-settings`.)
  */
 @Module({
-  imports: [DocumentSettingsModule, FilesModule, EmployeesModule, RemindersModule, SearchModule],
+  imports: [DocumentSettingsModule, FilesModule, EmployeesModule, RemindersModule, SearchModule, DeletionModule],
   controllers: [DocumentsController],
   providers: [DocumentsService, DocumentViewService, DocumentIntakeService, DocumentVersionsService, DocumentRequirementsService, DocumentPreviewService, DocumentTextService, DocumentRemindersService, DocumentSearchProvider],
   exports: [DocumentsService, DocumentVersionsService, DocumentViewService, DocumentPreviewService, DocumentRequirementsService],

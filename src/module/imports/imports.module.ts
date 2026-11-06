@@ -35,6 +35,7 @@ import { MappingsService } from './mappings.service.js';
 import { SheetImportService } from './sheet-import.service.js';
 import { SheetProcessorService } from './sheet-processor.service.js';
 import { SheetRowsService } from './sheet-rows.service.js';
+import { DeletionModule } from '../deletion/deletion.module.js';
 
 /**
  * Bulk import (Import): a spreadsheet of clients, workers or hours read by code with a column mapping, and a batch of files (one, many, a folder or
@@ -43,7 +44,7 @@ import { SheetRowsService } from './sheet-rows.service.js';
  * lands in a review list first; nothing becomes a record until a person accepts it.
  */
 @Module({
-  imports: [
+  imports: [DeletionModule, 
     FormsModule,
     ListsModule,
     FilesModule,

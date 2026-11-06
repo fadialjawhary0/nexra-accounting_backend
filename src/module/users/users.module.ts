@@ -3,9 +3,10 @@ import { AuthModule } from '../auth/auth.module.js';
 import { ListsModule } from '../lists/lists.module.js';
 import { UsersController, UsersLookupController } from './users.controller.js';
 import { UsersService } from './users.service.js';
+import { DeletionModule } from '../deletion/deletion.module.js';
 
 @Module({
-  imports: [AuthModule, ListsModule],
+  imports: [DeletionModule, AuthModule, ListsModule],
   controllers: [UsersController, UsersLookupController],
   providers: [UsersService],
   exports: [UsersService],

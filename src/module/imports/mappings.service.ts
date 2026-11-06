@@ -100,14 +100,6 @@ export class MappingsService {
     return serializeMapping(updated);
   }
 
-  async remove(id: string) {
-    const row = await this.findOrThrow(id);
-    if (row.isSystem) throw new ForbiddenException({ code: 'mapping_system', message: 'A mapping that comes with the system can only be switched off.' });
-    await this.prisma.importMapping.delete({ where: { id } });
-    await this.audit.log({ action: 'deleted', entityType: 'import_mapping', entityId: id, entityLabel: `${row.target}: ${row.name}` });
-    return { id };
-  }
-
   private async findOrThrow(id: string): Promise<ImportMapping> {
     const row = await this.prisma.importMapping.findUnique({ where: { id } });
     if (!row) throw new NotFoundException({ code: 'not_found', message: 'Mapping not found' });

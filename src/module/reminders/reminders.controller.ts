@@ -5,11 +5,15 @@ import { RequirePermission } from '../../common/decorators/require-permission.de
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.js';
 import { CreateReminderRuleDto, UpcomingQuery, UpdateReminderRuleDto } from './dto/reminder.dto.js';
 import { RemindersService } from './reminders.service.js';
+import { DeletionService } from '../deletion/deletion.service.js';
 
 /** Settings → Notifications & reminders: the rules, and a button to make today's reminders now. */
 @Controller('reminders')
 export class RemindersController {
-  constructor(private readonly reminders: RemindersService) {}
+  constructor(
+    private readonly reminders: RemindersService,
+    private readonly deletion: DeletionService,
+  ) {}
 
   /** `{ rules, triggers, users, roles }` — the rules and what a new rule can watch and be sent to. */
   @RequirePermission('settings.view')
@@ -31,10 +35,11 @@ export class RemindersController {
     return this.reminders.update(id, dto);
   }
 
-  @RequirePermission('settings.edit')
+  /** Deletes a reminder rule (soft). */
+  @RequirePermission('settings.remove')
   @Delete('rules/:id')
-  remove(@Param('id') id: string) {
-    return this.reminders.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.deletion.delete('reminder_rule', id, user);
   }
 
   /** Makes every reminder that is due today and was not made yet; the answer says how many. */

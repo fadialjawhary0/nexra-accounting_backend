@@ -207,7 +207,7 @@ export class VatPeriodsService {
     const [totals, dones, clients] = await Promise.all([
       this.prisma.vatPeriod.groupBy({ by: ['periodStart'], where: { kind, isActive: true }, _count: { _all: true } }),
       this.prisma.vatPeriod.groupBy({ by: ['periodStart'], where: { kind, isActive: true, completedAt: { not: null } }, _count: { _all: true } }),
-      this.prisma.$queryRaw<Array<{ frequency: string | null; total: bigint }>>`SELECT NULLIF("data"->>'vat_frequency', '') AS frequency, count(*) AS total FROM "Client" WHERE "isActive" = true GROUP BY 1`,
+      this.prisma.$queryRaw<Array<{ frequency: string | null; total: bigint }>>`SELECT NULLIF("data"->>'vat_frequency', '') AS frequency, count(*) AS total FROM "Client" WHERE "isActive" = true AND "deletedAt" IS NULL GROUP BY 1`,
     ]);
     const total = new Map(totals.map(entry => [formatDay(entry.periodStart), entry._count._all]));
     const done = new Map(dones.map(entry => [formatDay(entry.periodStart), entry._count._all]));

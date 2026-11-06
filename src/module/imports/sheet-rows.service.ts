@@ -205,7 +205,7 @@ export class SheetRowsService {
       await this.actors.runAs(principal, () => this.checkAll(job, principal));
       await this.prisma.importJob.update({ where: { id: jobId }, data: { status: 'ready', activity: null } });
       const counts = await this.prisma.importItem.groupBy({ by: ['status'], where: { jobId }, _count: { _all: true } });
-      await this.imports.tell(job, 'import.review', { count: counts.filter(entry => entry.status !== 'skipped').reduce((total, entry) => total + entry._count._all, 0) });
+      await this.imports.tell(job, 'import.rows_review', { count: counts.filter(entry => entry.status !== 'skipped' && entry.status !== 'accepted').reduce((total, entry) => total + entry._count._all, 0) });
     } catch (error) {
       this.logger.error(`Checking import ${jobId} failed: ${(error as Error).message}`);
       await this.imports.fail(jobId, 'draft', 'check_failed');
@@ -219,7 +219,10 @@ export class SheetRowsService {
     const docs = await this.data.docs();
     const defs = defsOf(docs);
     const context = await this.lookups.context();
-    await this.prisma.importItem.deleteMany({ where: { jobId: job.id } });
+    // Rows that were saved already (the import was partly saved, then its setup changed or it was checked again) stay as they are and are not read again.
+    const saved = await this.prisma.importItem.findMany({ where: { jobId: job.id, status: 'accepted' }, select: { name: true, path: true } });
+    const savedRows = new Set(saved.filter(row => row.path === setup.sheet).map(row => row.name));
+    await this.prisma.importItem.deleteMany({ where: { jobId: job.id, status: { not: 'accepted' } } });
 
     const seen = new Map<string, number>();
     const workers = new Map<string, WorkerRef[]>();
@@ -231,6 +234,11 @@ export class SheetRowsService {
 
     for (const [index, row] of sheet.rows.slice(setup.headerRow + 1).entries()) {
       const rowNumber = setup.headerRow + 2 + index;
+      // A saved row keeps its place in the list.
+      if (savedRows.has(String(rowNumber))) {
+        order += 1;
+        continue;
+      }
       let result: RowResult | null;
       if (setup.target === 'client') {
         const read = this.readRow(row, setup, defs, context);
@@ -603,9 +611,15 @@ export class SheetRowsService {
       await this.imports.fail(jobId, 'ready', 'commit_failed');
       return;
     }
-    const [accepted, failed] = await Promise.all([this.prisma.importItem.count({ where: { jobId, status: 'accepted' } }), this.prisma.importItem.count({ where: { jobId, status: 'error' } })]);
-    await this.prisma.importJob.update({ where: { id: jobId }, data: { status: 'done', activity: null, finishedAt: new Date() } });
-    await this.imports.tell(job, 'import.done', { done: accepted, failed });
+    const [accepted, failed, invalid] = await Promise.all([
+      this.prisma.importItem.count({ where: { jobId, status: 'accepted' } }),
+      this.prisma.importItem.count({ where: { jobId, status: 'error' } }),
+      this.prisma.importItem.count({ where: { jobId, status: 'invalid' } }),
+    ]);
+    // Rows that were left out (a problem) or failed stay open: they can still be corrected and saved. Only an import with nothing left to fix is done.
+    const left = invalid + failed;
+    await this.prisma.importJob.update({ where: { id: jobId }, data: left ? { status: 'ready', activity: null } : { status: 'done', activity: null, finishedAt: new Date() } });
+    await this.imports.tell(job, left ? 'import.partly' : 'import.done', left ? { done: accepted, left } : { done: accepted, failed });
   }
 
   private async commitAll(job: ImportJob, user: AuthenticatedUser): Promise<void> {

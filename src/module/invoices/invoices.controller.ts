@@ -8,6 +8,7 @@ import { ExportsService } from '../../lib/exports/exports.service.js';
 import { CancelInvoiceDto, CreateInvoiceDto, CreditInvoiceDto, InvoiceExportQuery, InvoiceListQuery, InvoiceStatusDto, InvoiceWorkersQuery, IssueInvoiceDto, MarkupQuery, PartiesQuery, UpdateInvoiceDto } from './dto/invoice.dto.js';
 import { InvoicesService } from './invoices.service.js';
 import { MarkupReportService } from './markup-report.service.js';
+import { DeletionService } from '../deletion/deletion.service.js';
 
 @Controller('invoices')
 @RequirePermission('invoices.view')
@@ -16,6 +17,7 @@ export class InvoicesController {
     private readonly invoices: InvoicesService,
     private readonly markup: MarkupReportService,
     private readonly exports: ExportsService,
+    private readonly deletion: DeletionService,
   ) {}
 
   /** The list: `direction`, `clientId`, `partyId` (the other company), `status` (default: all but cancelled; `all`), `month` or `from` / `to`, `open`, `overdue`, `search`, `page`, `pageSize`, `stats=true`. */
@@ -94,11 +96,11 @@ export class InvoicesController {
     return this.invoices.update(id, dto, user);
   }
 
-  /** Only a draft can be deleted. */
-  @RequirePermission('invoices.delete')
+  /** Deletes an invoice (soft); the days it closed are opened again. */
+  @RequirePermission('invoices.remove')
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.invoices.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.deletion.delete('invoice', id, user);
   }
 
   /** `{ number?, invoiceDate?, dueDate?, reason? }` — gives an outgoing draft its number, makes the documents and closes the days it bills. */

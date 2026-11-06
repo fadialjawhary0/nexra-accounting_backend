@@ -77,7 +77,8 @@ export class VatStepsService {
   }
 
   private async freeCode(base: string): Promise<string> {
-    const taken = new Set((await this.prisma.vatStep.findMany({ select: { code: true } })).map(step => step.code));
+    // Deleted steps keep their code (the seed must not bring a shipped one back): a new step gets another one.
+    const taken = new Set((await this.prisma.withDeleted.vatStep.findMany({ select: { code: true } })).map(step => step.code));
     const start = base || 'step';
     if (!taken.has(start)) return start;
     for (let number = 2; number < 200; number += 1) if (!taken.has(`${start}_${number}`)) return `${start}_${number}`;

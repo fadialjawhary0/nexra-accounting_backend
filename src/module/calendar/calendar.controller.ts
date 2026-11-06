@@ -8,6 +8,7 @@ import { DAY_PATTERN } from '../../common/dates.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.js';
 import { matrixAllows } from '../roles/permission-catalog.js';
 import { CalendarService } from './calendar.service.js';
+import { DeletionService } from '../deletion/deletion.service.js';
 
 class HolidayQuery {
   @IsOptional() @Matches(DAY_PATTERN) from?: string;
@@ -46,7 +47,10 @@ class GenerateYearDto {
 
 @Controller('calendar')
 export class CalendarController {
-  constructor(private readonly calendar: CalendarService) {}
+  constructor(
+    private readonly calendar: CalendarService,
+    private readonly deletion: DeletionService,
+  ) {}
 
   /** What every date picker needs: which weekdays are weekend, and whether to warn. Open to every signed-in person. */
   @Get('config')
@@ -86,9 +90,10 @@ export class CalendarController {
     return this.calendar.update(id, dto, locale);
   }
 
-  @RequirePermission('settings.edit')
+  /** Deletes a holiday (soft: it stays in the database, the app no longer shows it). */
+  @RequirePermission('settings.remove')
   @Delete('holidays/:id')
-  remove(@Param('id') id: string) {
-    return this.calendar.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.deletion.delete('holiday', id, user);
   }
 }

@@ -251,6 +251,9 @@ src/
   - *Spreadsheets* (`sheet-*.ts`): `POST /imports/spreadsheet` → `GET /imports/:id/sheet` (sheet, header row, proposed mapping, the fields of the target from the **live form definitions**) → `PUT /imports/:id/setup`
     → `POST /imports/:id/check` (background; nothing is saved) → `PATCH /imports/:id/items/:itemId` to correct a row → `POST /imports/:id/commit` (background; the person's own permissions, the normal services). Targets
     `client` (+ its owner), `employee`, `hours` (a row per day or per worker with weekday columns); duplicates policy `skip · fill · overwrite`; `ImportMapping` layouts; xls / ods through LibreOffice.
+    **A partly saved sheet stays open** (06-11-2026): when rows with a problem (`invalid`) or a failed save (`error`) are left, the commit ends in `ready` (notice `import.partly`) instead of `done`, so those rows
+    can still be corrected (`PATCH`) and saved with another commit; only a sheet with nothing left to fix becomes `done`. Saved (`accepted`) rows are records: a new setup or check keeps them and does
+    not read their sheet rows again, and the target can no longer change (`imports.targetLocked`). Migration `reopen_partly_saved_imports` reopens such sheets that had ended in `done`.
   - *Files* (`document-*.ts`, `classification-rules.ts`): `POST /imports` → `POST /imports/:id/files | zip` → `POST /imports/:id/start` → per file `import-file`: read by code (`unpdf`, Word, text) → rules (client
     folder `<nr>- `, `0-GESTOPT`, dated folders, file-name patterns) → AI sorting (quick model) → AI reading with a schema built from the form definitions → `DocumentEvaluatorService` (matching, merging fill-only,
     warnings) → `review`. Then `PATCH …/items/:itemId`, `POST …/items/:itemId/accept | reject | reread`, `POST /imports/:id/accept` (everything that is safe). `DocumentAcceptService` makes the records through
@@ -306,8 +309,15 @@ src/
 - **A filled form** is filed as a document of the client (`FilesService.store`, purpose `form_document`, or `form_document_personal` when a sensitive value is in it; document type `form`, standard folder *Formulieren
   Belastingdienst*, name by the form's pattern), linked to the worker, and logged as a `FormSubmission` with a snapshot of the values that are **not** sensitive. Showing a sensitive value to the person filling in is
   audited as `revealed`. The follow-up day = the sent day + `followUpDays`, moved to a working day (`CalendarService.moveDeadline`).
-- Seed: the lists `form_submission_status` and `address_category`, five addresses and **six forms as made-up fillable example PDFs with their mapping** (`prisma/seed-data/official-forms.ts`, `official-form-pdfs.ts`; each seeded
-  mapping is checked with `sanitizeMapping` when seeding), the reminder rule `form_follow_up`. Migration `20261012124633_official_forms` (four tables; gives the staff role `official_forms → view, create`).
+- Seed: the lists `form_submission_status` and `address_category`, five addresses (`prisma/seed-data/official-forms.ts`) and the reminder rule `form_follow_up`. Migration `20261012124633_official_forms` (four tables; gives the
+  staff role `official_forms → view, create`). The six example forms the seed shipped were taken out on 06-11-2026 (migration `20261106150000_own_official_forms`, which also drops `OfficialForm.officialUrl` and
+  `OfficialFormVersion.isSample` and adds `OfficialFormVersion.setup`).
+- **The office's own PDFs, set up by the AI** (06-11-2026) — `POST /official-forms/upload` `{ fileId, name? }` makes a form from its PDF; every new edition is read for its fields **with their place on the page and the
+  words printed next to them** (`PdfService.inspect` + `PdfService.layout` → `src/lib/pdf/pdf-layout.ts`: text lines, empty rectangles, rows of letter boxes, tick boxes, lines to write on). A PDF **without fields** is
+  accepted: its answers go into **placed boxes** (`fields[].placed`, names `box_n`, `sanitizeBoxes` in `form-fields.ts`) that `PdfService.fill` writes onto the page (`options.placed`). `FormSetupService`
+  (`form-setup.service.ts`, queue `official-form-setup`, AI feature `form_setup`) links the fields / places the boxes in the background and keeps its state in `setup` (`form-setup.ts`: status none · waiting · running ·
+  done · failed · off, mode fields / flat, linked, the fields nobody checked yet); `POST …/versions/:versionId/setup` `{ replace? }` runs it again; `PUT …/mapping` takes `boxes` too and marks the AI's links as checked;
+  `prepare` / `preview` / `submissions` take unsaved `boxes` for trying. A protected PDF (`pdf_encrypted`) and a dynamic Adobe form without fields (`pdf_dynamic_form`) are refused with what to do.
 
 ## Inspections (Phase 14)
 
@@ -384,10 +394,24 @@ New building blocks are created with the Nest CLI, always without spec files:
 `npx nest g module module/<name>`, `npx nest g service module/<name>/<name> --flat --no-spec`, …
 (imports keep their `.js` suffix — the project is ESM).
 
+## Delete (soft) — Ahmad's notes 4
+
+- **`module/deletion`:** `GET /deletions/:type/:id/preview` (name, what goes with it per table, or why it is refused),
+  `DELETE /deletions/:type/:id` (soft; returns the `deletionId`), `POST /deletions/:deletionId/restore`. What each kind of
+  record takes along, which unique values are freed (tombstones) and why one may be refused is in `deletion.specs.ts`;
+  the permission is `<area>.remove`. The old delete routes of features call `DeletionService.delete` too.
+- **`src/lib/database/soft-delete.ts`:** the injected client never reads deleted rows of the 35 tables listed there
+  (reads, `updateMany`, `deleteMany`). Write `deletedAt: null` / `ALIVE` yourself in a nested `include` of a relation list,
+  in `_count`, in relation filters (`some` / `none`), in raw SQL (`"deletedAt" IS NULL`) and when a record is read through
+  another table (a session's user). `this.prisma.withDeleted` reads everything (deleting, restoring, choosing a free code).
+- A new table with records people can delete: add the three columns + indexes, its name in `SOFT_DELETE_MODELS`, a spec
+  in `deletion.specs.ts`, the type in the frontend's `DELETION_AREAS`, and its model name in `common.deletion.models`.
+
 ## Conventions
 
 - **Database:** cuid ids, `createdAt` / `updatedAt`, `isActive` + `deactivatedAt` / `deactivatedById` / `deactivationReason`
-  on main records (nothing is hard-deleted), `data Json` for the admin-defined dynamic fields, `searchText` for search.
+  on main records, `deletedAt` / `deletedById` / `deletionId` where records can be deleted (soft — nothing is hard-deleted),
+  `data Json` for the admin-defined dynamic fields, `searchText` for search.
   Extensions `citext`, `pg_trgm`, `unaccent` come with the first migration. Prisma only through the injected `PrismaService`.
 - **Responses:** controllers return plain values (wrapped as `{ data }`) or `paged(rows, pageMeta(total, query))` for lists.
 - **Audit:** every create / update / delete / activate / deactivate calls `AuditService.log(...)`; passwords, tokens, BSN and

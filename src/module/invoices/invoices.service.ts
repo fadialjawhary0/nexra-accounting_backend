@@ -254,7 +254,7 @@ export class InvoicesService {
       this.prisma.$queryRaw<Array<{ employeeId: string; rate: Prisma.Decimal }>>`
         SELECT DISTINCT ON (l."employeeId") l."employeeId", l."rate"
         FROM "InvoiceLine" l JOIN "Invoice" i ON i."id" = l."invoiceId"
-        WHERE l."employeeId" IN (${Prisma.join(ids)}) AND l."rate" IS NOT NULL AND i."direction" = ${query.direction} AND i."kind" = 'invoice' AND i."status" <> 'cancelled'
+        WHERE l."employeeId" IN (${Prisma.join(ids)}) AND l."rate" IS NOT NULL AND i."deletedAt" IS NULL AND i."direction" = ${query.direction} AND i."kind" = 'invoice' AND i."status" <> 'cancelled'
         ORDER BY l."employeeId", i."createdAt" DESC`,
       matrixAllows(user.matrix, 'salary_statements.view')
         ? this.prisma.rateHistory.findMany({ where: { employeeId: { in: ids }, validFrom: { lte: parseDay(todayInAmsterdam()) } }, orderBy: { validFrom: 'desc' } })
@@ -576,15 +576,6 @@ export class InvoicesService {
       after: { total: money.totals.totalCents / 100, lines: current.length },
     });
     return this.one(id, user);
-  }
-
-  /** A draft that was never issued has no legal standing: it can simply be deleted. */
-  async remove(id: string) {
-    const row = await this.detailRow(id);
-    if (!this.allowed(row).remove) throw new ConflictException({ code: 'invoice_locked', message: 'Only a draft can be deleted.' });
-    await this.prisma.invoice.delete({ where: { id } });
-    await this.audit.log({ action: 'deleted', entityType: 'invoice', entityId: id, entityLabel: this.label(row.number, row.client.number, partyLabel(partyOf(row))), before: { total: row.total.toNumber(), lines: row.lines.length } });
-    return { deleted: true };
   }
 
   /* ── The life of an invoice ───────────────────────────────────────────────────────────────────────────────────── */

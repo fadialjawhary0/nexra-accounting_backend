@@ -398,7 +398,8 @@ export class ClientsService implements OnModuleInit {
   private plan(query: ClientListQuery, filters: Record<string, string>, doc: FormDoc, matrix: PermissionMatrix, locale: AppLocale) {
     const context: QueryContext = { alias: 'c', columns: CLIENT_COLUMNS, locale };
     const usable = (field: FieldDef) => field.active && !isEncryptedField(field) && canViewField(field, matrix);
-    const conditions: Prisma.Sql[] = [];
+    // Deleted rows are hidden (soft delete): raw SQL does not go through the client's filter.
+    const conditions: Prisma.Sql[] = [Prisma.sql`c."deletedAt" IS NULL`];
 
     const statuses = splitList(query.status).filter(status => status === 'active' || status === 'stopped');
     if (statuses.length === 1) conditions.push(Prisma.sql`c."isActive" = ${statuses[0] === 'active'}`);

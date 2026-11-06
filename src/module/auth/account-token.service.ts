@@ -26,7 +26,7 @@ export class AccountTokenService {
   /** The token row (with its user) while it is unused and not expired; otherwise null. */
   find(rawToken: string, type: AuthTokenType) {
     return this.prisma.authToken.findFirst({
-      where: { tokenHash: this.crypto.sha256(rawToken), type, usedAt: null, expiresAt: { gt: new Date() } },
+      where: { tokenHash: this.crypto.sha256(rawToken), type, usedAt: null, expiresAt: { gt: new Date() }, user: { deletedAt: null } },
       include: { user: { include: { role: true } } },
     });
   }

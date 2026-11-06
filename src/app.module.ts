@@ -62,6 +62,7 @@ import { ReportsModule } from './module/reports/reports.module.js';
 import { SearchModule } from './module/search/search.module.js';
 import { TasksModule } from './module/tasks/tasks.module.js';
 import { TaxesModule } from './module/taxes/taxes.module.js';
+import { DeletionModule } from './module/deletion/deletion.module.js';
 
 @Module({
   imports: [
@@ -140,6 +141,7 @@ import { TaxesModule } from './module/taxes/taxes.module.js';
     DashboardModule,
     SearchModule,
     ReportsModule,
+    DeletionModule,
   ],
   providers: [
     { provide: APP_PIPE, useFactory: createValidationPipe },

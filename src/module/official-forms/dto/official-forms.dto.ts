@@ -28,7 +28,6 @@ export class SaveFormDto {
   @IsOptional() @IsString() @MaxLength(1000) descriptionEn?: string;
   /** The code printed on the form ("CPT 158"). */
   @IsOptional() @IsString() @MaxLength(60) authorityCode?: string;
-  @IsOptional() @IsString() @MaxLength(300) officialUrl?: string;
   @IsOptional() @IsIn(SUBJECTS) subject?: string;
   @IsOptional() @IsIn(PERIOD_KINDS) periodKind?: string;
   @IsOptional() @IsString() @MaxLength(60) recipientId?: string | null;
@@ -47,6 +46,12 @@ export class FormStatusDto {
   @IsOptional() @IsString() @MaxLength(300) reason?: string;
 }
 
+/** A new form made from its PDF in one go (uploaded with the purpose `form_blank` first): the name is the file's unless one is typed; the AI fills in the rest. */
+export class UploadFormDto {
+  @IsString() @MaxLength(60) fileId!: string;
+  @IsOptional() @IsString() @MaxLength(120) name?: string;
+}
+
 /** A new edition of the blank PDF (uploaded with the purpose `form_blank` first). */
 export class CreateVersionDto {
   @IsString() @MaxLength(60) fileId!: string;
@@ -57,6 +62,13 @@ export class CreateVersionDto {
 
 export class SaveMappingDto {
   @IsArray() @ArrayMaxSize(MAX_MAPPING_ENTRIES) mapping!: unknown[];
+  /** The boxes placed on the pages (a PDF without fields, or one that misses a field): they replace the boxes there were. Left out = unchanged. */
+  @IsOptional() @IsArray() @ArrayMaxSize(MAX_MAPPING_ENTRIES) boxes?: unknown[];
+}
+
+/** Let the AI set the PDF up again; `replace`: for a PDF without fields, its boxes replace the ones there are. */
+export class SetupDto {
+  @IsOptional() @IsBoolean() replace?: boolean;
 }
 
 /* ── Filling a form in ────────────────────────────────────────────────────────────────────────────────────────────── */
@@ -78,8 +90,9 @@ export class SubjectsQuery {
 export class PrepareDto extends SubjectDto {
   /** The edition to use (default: the newest). */
   @IsOptional() @IsString() @MaxLength(60) versionId?: string;
-  /** For somebody who edits the library: a mapping that is not saved yet, to try it. */
+  /** For somebody who edits the library: a mapping that is not saved yet, to try it — with the boxes placed on the pages that are not saved yet. */
   @IsOptional() @IsArray() @ArrayMaxSize(MAX_MAPPING_ENTRIES) mapping?: unknown[];
+  @IsOptional() @IsArray() @ArrayMaxSize(MAX_MAPPING_ENTRIES) boxes?: unknown[];
   /** Values read from a photo or scan (`client.kvk`: …) — shown as suggestions. */
   @IsOptional() @IsObject() overlay?: Record<string, unknown>;
 }
@@ -88,8 +101,9 @@ export class PrepareDto extends SubjectDto {
 export class FillValuesDto extends SubjectDto {
   @IsOptional() @IsString() @MaxLength(60) versionId?: string;
   @IsObject() values!: Record<string, unknown>;
-  /** For somebody who edits the library: a mapping that is not saved yet. */
+  /** For somebody who edits the library: a mapping that is not saved yet (and boxes placed on the pages that are not saved yet). */
   @IsOptional() @IsArray() @ArrayMaxSize(MAX_MAPPING_ENTRIES) mapping?: unknown[];
+  @IsOptional() @IsArray() @ArrayMaxSize(MAX_MAPPING_ENTRIES) boxes?: unknown[];
 }
 
 export class SubmitDto extends FillValuesDto {

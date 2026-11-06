@@ -3,10 +3,11 @@ import { CalendarModule } from '../calendar/calendar.module.js';
 import { NotificationsModule } from '../notifications/notifications.module.js';
 import { RemindersController } from './reminders.controller.js';
 import { RemindersService } from './reminders.service.js';
+import { DeletionModule } from '../deletion/deletion.module.js';
 
 /** Reminders (Herinneringen): rules that tell people N days before a date, the engine that makes them, and the list of what features let it watch. */
 @Module({
-  imports: [CalendarModule, NotificationsModule],
+  imports: [DeletionModule, CalendarModule, NotificationsModule],
   controllers: [RemindersController],
   providers: [RemindersService],
   exports: [RemindersService],

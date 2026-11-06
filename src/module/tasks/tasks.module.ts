@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { DeletionModule } from '../deletion/deletion.module.js';
 import { ListsModule } from '../lists/lists.module.js';
 import { NotificationsModule } from '../notifications/notifications.module.js';
 import { RemindersModule } from '../reminders/reminders.module.js';
@@ -11,7 +12,7 @@ import { TasksService } from './tasks.service.js';
 
 /** Tasks (Taken): the office's to-do list — who does what by when, optionally about a client, a worker, a contract, an invoice, an inspection or a document. */
 @Module({
-  imports: [ListsModule, NotificationsModule, RemindersModule, SearchModule],
+  imports: [ListsModule, NotificationsModule, RemindersModule, SearchModule, DeletionModule],
   controllers: [TasksController],
   providers: [TasksService, TaskLinksService, TaskRemindersService, TaskSearchProvider],
   exports: [TasksService, TaskLinksService],

@@ -22,7 +22,7 @@ export class AuthContextService {
   async authenticate(payload: { sub?: string; sid?: string }, activeRoleKey?: string): Promise<AuthenticatedUser> {
     if (!payload.sub || !payload.sid) throw this.unauthorized();
     const session = await this.prisma.session.findUnique({ where: { id: payload.sid }, include: { user: { include: { role: true } } } });
-    if (!session || session.userId !== payload.sub) throw this.unauthorized();
+    if (!session || session.userId !== payload.sub || session.user.deletedAt) throw this.unauthorized();
     this.tokens.assertSessionUsable(session);
     if (session.user.status !== 'active') throw this.unauthorized();
     if (Date.now() - session.lastUsedAt.getTime() > TOUCH_EVERY_MS) void this.touch(session.id, session.userId);

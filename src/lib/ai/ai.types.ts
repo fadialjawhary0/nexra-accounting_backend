@@ -1,5 +1,5 @@
 /** What the AI is used for — each one has its own switch in Settings → AI and its own line in the usage overview. */
-export const AI_FEATURES = ['classify', 'id_document', 'kvk_extract', 'contract', 'staffing_invoice', 'timesheet', 'letter', 'mapping', 'form_fill', 'inspection_request', 'inbox', 'test'] as const;
+export const AI_FEATURES = ['classify', 'id_document', 'kvk_extract', 'contract', 'staffing_invoice', 'timesheet', 'letter', 'mapping', 'form_fill', 'form_setup', 'inspection_request', 'inbox', 'test'] as const;
 export type AiFeature = (typeof AI_FEATURES)[number];
 
 /** The features a person can switch off (the connection test always works). */

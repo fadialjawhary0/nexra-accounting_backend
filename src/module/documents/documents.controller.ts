@@ -7,6 +7,7 @@ import { Locale, type AppLocale } from '../../common/decorators/locale.decorator
 import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.js';
 import { ExportsService } from '../../lib/exports/exports.service.js';
+import { DeletionService } from '../deletion/deletion.service.js';
 import { FileUploadInterceptor } from '../files/file-upload.interceptor.js';
 import { DocumentIntakeService } from './document-intake.service.js';
 import { DocumentPreviewService } from './document-preview.service.js';
@@ -44,6 +45,7 @@ export class DocumentsController {
     private readonly previews: DocumentPreviewService,
     private readonly text: DocumentTextService,
     private readonly exports: ExportsService,
+    private readonly deletion: DeletionService,
   ) {}
 
   /* ── Lists ────────────────────────────────────────────────────────────────────────────────────────────────────── */
@@ -130,10 +132,11 @@ export class DocumentsController {
     return this.documents.update(id, dto, user, locale);
   }
 
-  @RequirePermission('documents.delete')
+  /** Deletes the document with all its versions (soft; `POST /deletions/:deletionId/restore` brings it back). */
+  @RequirePermission('documents.remove')
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.documents.remove(id, user);
+    return this.deletion.delete('document', id, user);
   }
 
   @RequirePermission('documents.delete')

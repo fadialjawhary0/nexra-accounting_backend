@@ -61,12 +61,12 @@ export class TokenService {
   async refresh(rawToken: string, meta: RequestMeta): Promise<IssuedTokens> {
     const stored = await this.prisma.refreshToken.findUnique({
       where: { tokenHash: this.crypto.sha256(rawToken) },
-      include: { session: { include: { user: { select: { id: true, status: true } } } } },
+      include: { session: { include: { user: { select: { id: true, status: true, deletedAt: true } } } } },
     });
     const session = stored?.session;
     if (!stored || !session) throw new UnauthorizedException({ code: 'unauthorized', message: 'Sign in again' });
     this.assertSessionUsable(session);
-    if (session.user.status !== 'active') throw new UnauthorizedException({ code: 'unauthorized', message: 'Sign in again' });
+    if (session.user.status !== 'active' || session.user.deletedAt) throw new UnauthorizedException({ code: 'unauthorized', message: 'Sign in again' });
 
     if (stored.usedAt) {
       if (Date.now() - stored.usedAt.getTime() <= REUSE_GRACE_MS) return this.issue(session.userId, session.id, session.expiresAt, false);

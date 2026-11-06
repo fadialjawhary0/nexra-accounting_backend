@@ -7,7 +7,7 @@ import { RequirePermission } from '../../common/decorators/require-permission.de
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.js';
 import { ExportsService } from '../../lib/exports/exports.service.js';
 import { FileUploadInterceptor } from '../files/file-upload.interceptor.js';
-import { CreateVersionDto, FillValuesDto, FormExportQuery, FormListQuery, FormStatusDto, PrepareDto, SaveFormDto, SaveMappingDto, SubjectsQuery, SubmitDto } from './dto/official-forms.dto.js';
+import { CreateVersionDto, FillValuesDto, FormExportQuery, FormListQuery, FormStatusDto, PrepareDto, SaveFormDto, SaveMappingDto, SetupDto, SubjectsQuery, SubmitDto, UploadFormDto } from './dto/official-forms.dto.js';
 import { FormAiService } from './form-ai.service.js';
 import { FormFillService } from './form-fill.service.js';
 import { FormSourcesService } from './form-sources.service.js';
@@ -67,6 +67,13 @@ export class OfficialFormsController {
     return this.forms.create(dto, user, locale);
   }
 
+  /** `{ fileId, name? }` — a new form made from its PDF in one go (uploaded through `POST /files` with the purpose `form_blank`); the AI sets it up in the background. */
+  @RequirePermission('official_forms.edit')
+  @Post('upload')
+  upload(@Body() dto: UploadFormDto, @CurrentUser() user: AuthenticatedUser, @Locale() locale: AppLocale) {
+    return this.versions.createForm(dto, user, locale);
+  }
+
   @Get(':id')
   one(@Param('id') id: string, @Locale() locale: AppLocale) {
     return this.forms.one(id, locale);
@@ -101,11 +108,19 @@ export class OfficialFormsController {
     return this.versions.one(id, versionId);
   }
 
-  /** `{ mapping: [...] }` — saves what goes into each field of the PDF. */
+  /** `{ mapping: [...], boxes?: [...] }` — saves what goes into each field of the PDF, and the boxes placed on its pages. */
   @RequirePermission('official_forms.edit')
   @Put(':id/versions/:versionId/mapping')
   saveMapping(@Param('id') id: string, @Param('versionId') versionId: string, @Body() dto: SaveMappingDto) {
     return this.versions.saveMapping(id, versionId, dto);
+  }
+
+  /** `{ replace? }` — lets the AI set the PDF up again (in the background): the fields nobody linked yet, or the boxes of a PDF without fields. */
+  @RequirePermission('official_forms.edit')
+  @HttpCode(200)
+  @Post(':id/versions/:versionId/setup')
+  setup(@Param('id') id: string, @Param('versionId') versionId: string, @Body() dto: SetupDto) {
+    return this.versions.rerun(id, versionId, dto);
   }
 
   /** The blank PDF of an edition. */

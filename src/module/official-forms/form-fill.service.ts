@@ -17,8 +17,9 @@ import { FilesService } from '../files/files.service.js';
 import { matrixAllows } from '../roles/permission-catalog.js';
 import type { DocLocale } from '../templates/merge-format.js';
 import type { FillValuesDto, PrepareDto, SubmitDto, SubjectDto } from './dto/official-forms.dto.js';
-import { isFillable, readFields, shortName } from './form-fields.js';
+import { isFillable, readFields, sanitizeBoxes, shortName } from './form-fields.js';
 import { placeholdersOf, readMapping, sanitizeMapping, type FieldMapping, type SourceRef } from './form-mapping.js';
+import { readSetup } from './form-setup.js';
 import { FormSourcesService, type SubjectContext } from './form-sources.service.js';
 import { FormSubmissionsService } from './form-submissions.service.js';
 import { composeText, formatValue, matchOption, passes, pickChoice, type Resolved } from './form-values.js';
@@ -53,7 +54,7 @@ export interface PreparedField {
 }
 
 export interface PreparedWarning {
-  code: 'client_stopped' | 'no_people' | 'pending_exists' | 'nothing_mapped' | 'sample_form' | 'form_inactive';
+  code: 'client_stopped' | 'no_people' | 'pending_exists' | 'nothing_mapped' | 'ai_unchecked' | 'form_inactive';
   params?: Record<string, unknown>;
 }
 
@@ -90,11 +91,16 @@ export class FormFillService {
     return version;
   }
 
-  /** The mapping to work with: the saved one, or — for somebody who edits the library — one that is being tried. */
-  private async mappingOf(version: OfficialFormVersion, tried: unknown[] | undefined, user: AuthenticatedUser): Promise<{ mapping: FieldMapping[]; fields: PdfFieldInfo[] }> {
-    const fields = readFields(version.fields);
+  /** The mapping to work with: the saved one, or — for somebody who edits the library — one that is being tried (with the boxes placed on the pages that are not saved yet). */
+  private async mappingOf(version: OfficialFormVersion, tried: unknown[] | undefined, user: AuthenticatedUser, triedBoxes?: unknown[]): Promise<{ mapping: FieldMapping[]; fields: PdfFieldInfo[] }> {
+    let fields = readFields(version.fields);
     if (!tried) return { mapping: readMapping(version.mapping), fields };
     if (!matrixAllows(user.matrix, 'official_forms.edit')) throw new ForbiddenException({ code: 'forbidden', message: 'You do not have access to this.' });
+    if (triedBoxes) {
+      const boxes = sanitizeBoxes(triedBoxes, version.pageCount, readSetup(version.setup).pages);
+      if (Object.keys(boxes.problems).length) throw validationFailed(boxes.problems);
+      fields = [...fields.filter(field => !field.placed), ...boxes.boxes];
+    }
     const known = await this.sources.knownKeys();
     const { mapping, problems } = sanitizeMapping(tried, fields, key => known.has(key));
     if (Object.keys(problems).length) throw validationFailed(problems);
@@ -203,7 +209,7 @@ export class FormFillService {
   async prepare(formId: string, dto: PrepareDto, user: AuthenticatedUser, locale: AppLocale) {
     const form = await this.forms.rowOrThrow(formId);
     const version = await this.editionOf(form, dto.versionId);
-    const { mapping, fields: pdfFields } = await this.mappingOf(version, dto.mapping, user);
+    const { mapping, fields: pdfFields } = await this.mappingOf(version, dto.mapping, user, dto.boxes);
     const { context, period } = await this.contextFor(form, dto, user);
     const overlay = dto.overlay ? this.withOverlay(context, dto.overlay) : undefined;
     // What a photo said is shown beside the values of the record; a gap is filled with it, the rest is a suggestion.
@@ -220,7 +226,8 @@ export class FormFillService {
     if (form.subject === 'person' && !context.person) warnings.push({ code: 'no_people' });
     if (form.warnWhenPending && pending.length) warnings.push({ code: 'pending_exists', params: { count: pending.length } });
     if (!fields.length) warnings.push({ code: 'nothing_mapped' });
-    if (version.isSample) warnings.push({ code: 'sample_form' });
+    // The AI linked fields that nobody has checked yet: the person looks at the filled form with extra care.
+    if (readSetup(version.setup).suggested.length) warnings.push({ code: 'ai_unchecked' });
 
     await this.auditReveal(fields, context, form);
     return {
@@ -272,18 +279,19 @@ export class FormFillService {
     return { values: out, typed };
   }
 
-  private async render(form: OfficialForm, version: OfficialFormVersion, values: Record<string, PdfFieldValue>, title: string) {
+  /** The blank PDF with the values in it: in its fields, and written onto the page in the boxes placed on it. */
+  private async render(form: OfficialForm, version: OfficialFormVersion, values: Record<string, PdfFieldValue>, title: string, fields: PdfFieldInfo[]) {
     const { buffer } = await this.files.bytes(version.fileId);
-    return this.pdf.fill(buffer, values, { flatten: form.flatten, title }).catch(pdfProblem);
+    return this.pdf.fill(buffer, values, { flatten: form.flatten, title, placed: fields.filter(field => field.placed) }).catch(pdfProblem);
   }
 
   /** The PDF as it would be filed, without saving anything. */
   async preview(formId: string, dto: FillValuesDto, user: AuthenticatedUser, locale: AppLocale): Promise<{ bytes: Buffer; name: string }> {
     const form = await this.forms.rowOrThrow(formId);
     const version = await this.editionOf(form, dto.versionId);
-    const { mapping, fields } = await this.mappingOf(version, dto.mapping, user);
+    const { mapping, fields } = await this.mappingOf(version, dto.mapping, user, dto.boxes);
     const { values } = this.pdfValues(dto.values, mapping, fields);
-    const filled = await this.render(form, version, values, locale === 'nl' ? form.nameNl : form.nameEn);
+    const filled = await this.render(form, version, values, locale === 'nl' ? form.nameNl : form.nameEn, fields);
     return { bytes: filled.bytes, name: `${(locale === 'nl' ? form.nameNl : form.nameEn).replace(/[\\/:*?"<>|]+/g, ' ').trim()}.pdf` };
   }
 
@@ -293,7 +301,7 @@ export class FormFillService {
     const form = await this.forms.rowOrThrow(formId);
     if (!form.isActive) throw new UnprocessableEntityException({ code: 'form_inactive', message: 'This form is switched off.' });
     const version = await this.editionOf(form, dto.versionId);
-    const { mapping, fields } = await this.mappingOf(version, dto.mapping, user);
+    const { mapping, fields } = await this.mappingOf(version, dto.mapping, user, dto.boxes);
     const { context, period } = await this.contextFor(form, dto, user);
     const { values, typed } = this.pdfValues(dto.values, mapping, fields);
 
@@ -316,7 +324,7 @@ export class FormFillService {
     const documentLocale = this.documentLocale();
     const formName = documentLocale === 'nl' ? form.nameNl : form.nameEn;
     const today = todayInAmsterdam();
-    const filled = await this.render(form, version, values, formName);
+    const filled = await this.render(form, version, values, formName, fields);
     const type = await this.types.byCode(form.docType);
     const folderId = await this.folderFor(context.client.id, form.folderCode ?? type?.folderCode ?? null);
     const name = await this.fileName(form, formName, context, today, folderId);

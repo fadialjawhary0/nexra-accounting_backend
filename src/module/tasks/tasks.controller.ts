@@ -5,6 +5,7 @@ import { Locale, type AppLocale } from '../../common/decorators/locale.decorator
 import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.js';
 import { ExportsService } from '../../lib/exports/exports.service.js';
+import { DeletionService } from '../deletion/deletion.service.js';
 import { CreateTaskDto, TaskActiveDto, TaskExportQuery, TaskListQuery, UpdateTaskDto } from './dto/tasks.dto.js';
 import { TasksService } from './tasks.service.js';
 
@@ -15,6 +16,7 @@ export class TasksController {
   constructor(
     private readonly tasks: TasksService,
     private readonly exports: ExportsService,
+    private readonly deletion: DeletionService,
   ) {}
 
   /** Filters: `mine`, `assigneeId` (or `none`), `status`, `priority`, `linkedType` + `linkedId`, `clientId`, `tag`, `open`, `due`, `state`, `search`; `stats=true` adds the counters. */
@@ -69,10 +71,10 @@ export class TasksController {
     return this.tasks.setActive(id, dto.isActive, user);
   }
 
-  /** Taking a task away switches it off; `POST /tasks/:id/active` brings it back. */
-  @RequirePermission('tasks.delete')
+  /** Deletes the task (soft; `POST /deletions/:deletionId/restore` brings it back). */
+  @RequirePermission('tasks.remove')
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.tasks.setActive(id, false, user);
+    return this.deletion.delete('task', id, user);
   }
 }

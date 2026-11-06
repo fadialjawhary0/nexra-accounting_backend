@@ -7,11 +7,9 @@ import path from 'node:path';
 import { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
 import { fold } from '../src/common/text.js';
 import { scanTemplate } from '../src/lib/documents/docx-template.js';
-import { PdfService } from '../src/lib/pdf/pdf.service.js';
 import { CONTRACT_REMINDER_DEFAULTS, CONTRACT_REMINDER_NAMES } from '../src/module/contracts/contract-reminder-defaults.js';
 import { DOCUMENT_REMINDER_DEFAULTS, DOCUMENT_REMINDER_NAMES } from '../src/module/documents/document-reminder-defaults.js';
 import type { FormDoc } from '../src/module/forms/form-doc.js';
-import { sanitizeMapping } from '../src/module/official-forms/form-mapping.js';
 import { FORM_FOLLOW_UP_DEFAULTS, FORM_FOLLOW_UP_NAME, FORM_FOLLOW_UP_TRIGGER } from '../src/module/official-forms/official-forms.constants.js';
 import { sanitizeDoc as sanitizeChecklist } from '../src/module/inspections/checklist-doc.js';
 import { INSPECTION_REMINDER_DEFAULTS, INSPECTION_REMINDER_NAMES } from '../src/module/inspections/inspections.constants.js';
@@ -19,8 +17,7 @@ import { TAX_REMINDER_DEFAULTS, TAX_REMINDER_NAMES } from '../src/module/taxes/t
 import { INVOICE_DUE_TRIGGER, INVOICE_REMINDER_DEFAULTS, INVOICE_REMINDER_NAME } from '../src/module/invoices/invoices.constants.js';
 import { TASK_DUE_TRIGGER, TASK_REMINDER_DEFAULTS, TASK_REMINDER_NAME } from '../src/module/tasks/tasks.constants.js';
 import { SEED_CHECKLISTS } from './seed-data/checklists.js';
-import { buildSampleForm } from './seed-data/official-form-pdfs.js';
-import { SEED_ADDRESSES, SEED_FORMS as SEED_OFFICIAL_FORMS, mappingOf, sampleOf } from './seed-data/official-forms.js';
+import { SEED_ADDRESSES } from './seed-data/official-forms.js';
 import { SEED_DOCUMENT_TYPES, SEED_FOLDERS, SEED_REQUIRED_DOCUMENTS, SYSTEM_TYPE_CODES } from './seed-data/documents.js';
 import { SEED_EXPORT_PRESETS } from './seed-data/export-presets.js';
 import { SEED_FORMS } from './seed-data/forms.js';
@@ -259,7 +256,7 @@ const seeders: Seeder[] = [
   {
     name: 'address book',
     run: async prisma => {
-      // The addresses the example forms are sent to. Created once (found by name, postal code, box and department); the office's edits are never overwritten.
+      // Addresses the office often sends forms to. Created once (found by name, postal code, box and department); the office's edits are never overwritten.
       for (const [index, entry] of SEED_ADDRESSES.entries()) {
         const identity = { name: entry.name, postalCode: entry.postalCode, box: entry.box ?? '', department: entry.department ?? '' };
         if (await prisma.addressBookEntry.findFirst({ where: identity })) continue;
@@ -267,67 +264,6 @@ const seeders: Seeder[] = [
         await prisma.addressBookEntry.create({
           data: { ...identity, boxKind: entry.boxKind ?? 'po_box', city: entry.city, country: 'NL', category: entry.category, note: entry.note, sortOrder: (index + 1) * 10, searchText: [...new Set(pieces.map(fold).filter(Boolean))].join(' ') },
         });
-      }
-    },
-  },
-  {
-    name: 'official forms',
-    run: async prisma => {
-      // Example forms (made-up fillable PDFs with their mapping), made once. The office uploads the official PDF as a new edition; a form that exists is never touched.
-      // The PDF reading is done by the same class the app uses, made here by hand because the seed runs outside the app.
-      const pdf = new PdfService();
-      const root = path.resolve(process.env.STORAGE_DIR?.trim() || './storage');
-      for (const [index, spec] of SEED_OFFICIAL_FORMS.entries()) {
-        if (await prisma.officialForm.findUnique({ where: { code: spec.code } })) continue;
-        const bytes = await buildSampleForm(sampleOf(spec));
-        const info = await pdf.inspect(bytes);
-        const { mapping, problems } = sanitizeMapping(mappingOf(spec), info.fields, () => true);
-        if (Object.keys(problems).length) throw new Error(`The mapping of the example form ${spec.code} does not fit its PDF: ${JSON.stringify(problems)}`);
-
-        const address = spec.recipient ? SEED_ADDRESSES.find(entry => entry.key === spec.recipient) : null;
-        const recipient = address ? await prisma.addressBookEntry.findFirst({ where: { name: address.name, postalCode: address.postalCode, box: address.box ?? '', department: address.department ?? '' } }) : null;
-        const key = `files/${randomUUID()}`;
-        const target = path.join(root, ...key.split('/'));
-        await mkdir(path.dirname(target), { recursive: true });
-        await writeFile(target, bytes);
-        const fileName = `${spec.nameNl.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim()} (voorbeeld).pdf`;
-        const file = await prisma.storedFile.create({
-          data: { name: fileName, mimeType: 'application/pdf', size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), storageKey: key, purpose: 'form_blank', area: 'official_forms', entityType: 'official_form' },
-        });
-        const form = await prisma.officialForm.create({
-          data: {
-            code: spec.code,
-            nameNl: spec.nameNl,
-            nameEn: spec.nameEn,
-            descriptionNl: spec.descriptionNl,
-            descriptionEn: spec.descriptionEn,
-            authorityCode: spec.authorityCode,
-            officialUrl: spec.officialUrl,
-            subject: spec.subject,
-            periodKind: spec.periodKind,
-            recipientId: recipient?.id ?? null,
-            followUpDays: spec.followUpDays,
-            warnWhenPending: spec.warnWhenPending,
-            docType: 'form',
-            folderCode: spec.folderCode,
-            sortOrder: (index + 1) * 10,
-          },
-        });
-        await prisma.officialFormVersion.create({
-          data: {
-            formId: form.id,
-            version: 1,
-            fileId: file.id,
-            fileName: file.name,
-            pageCount: info.pageCount,
-            fields: info.fields as unknown as Prisma.InputJsonArray,
-            mapping: mapping as unknown as Prisma.InputJsonArray,
-            isSample: true,
-            note: 'Voorbeeld dat met het systeem wordt meegeleverd',
-          },
-        });
-        await prisma.storedFile.update({ where: { id: file.id }, data: { entityId: form.id } });
-        console.log(`  Created the example form "${spec.nameNl}".`);
       }
     },
   },

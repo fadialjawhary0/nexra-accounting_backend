@@ -72,7 +72,7 @@ export class ContractRemindersService implements OnModuleInit {
   /** Running contracts with an end date that have not been renewed. */
   private async ending(today: string): Promise<ReminderItem[]> {
     const rows = await this.prisma.contract.findMany({
-      where: { status: 'active', endDate: { gte: parseDay(today) }, renewals: { none: { status: { not: 'cancelled' } } } },
+      where: { status: 'active', endDate: { gte: parseDay(today) }, renewals: { none: { status: { not: 'cancelled' }, deletedAt: null } } },
       include: WITH_PARTIES,
     });
     return rows.map(row => this.item(row, formatDay(row.endDate!), { date: formatDay(row.endDate!), start: formatDay(row.startDate) }));
@@ -81,7 +81,7 @@ export class ContractRemindersService implements OnModuleInit {
   /** Fixed-term contracts of six months or more: the last working day to give notice, a month before the end. */
   private async notice(today: string): Promise<ReminderItem[]> {
     const rows = await this.prisma.contract.findMany({
-      where: { status: 'active', type: 'fixed_term', endDate: { gt: parseDay(today) }, renewals: { none: { status: { not: 'cancelled' } } } },
+      where: { status: 'active', type: 'fixed_term', endDate: { gt: parseDay(today) }, renewals: { none: { status: { not: 'cancelled' }, deletedAt: null } } },
       include: WITH_PARTIES,
     });
     const items: ReminderItem[] = [];

@@ -98,13 +98,22 @@ export const NOTIFICATION_TEXTS: Record<string, NotificationText> = {
     nl: { title: '“{title}” begint {inNl}', body: '{detail}' },
     en: { title: '“{title}” starts {inEn}', body: '{detail}' },
   },
+  // Counts are written as "…: 3" so the sentence is right for one and for many.
   'import.review': {
-    nl: { title: 'De import “{name}” is klaar om te controleren', body: '{count} bestanden wachten op jouw controle.' },
-    en: { title: 'The import “{name}” is ready to review', body: '{count} files are waiting for you to check them.' },
+    nl: { title: 'De import “{name}” is klaar om te controleren', body: 'Bestanden om te controleren: {count}.' },
+    en: { title: 'The import “{name}” is ready to review', body: 'Files to check: {count}.' },
+  },
+  'import.rows_review': {
+    nl: { title: 'De import “{name}” is klaar om te controleren', body: 'Rijen om te bekijken en op te slaan: {count}.' },
+    en: { title: 'The import “{name}” is ready to review', body: 'Rows to look at and save: {count}.' },
   },
   'import.done': {
     nl: { title: 'De import “{name}” is klaar', body: '{done} verwerkt, {failed} met een fout.' },
     en: { title: 'The import “{name}” has finished', body: '{done} done, {failed} with an error.' },
+  },
+  'import.partly': {
+    nl: { title: 'De import “{name}” is deels opgeslagen', body: 'Opgeslagen: {done}. Nog te verbeteren en op te slaan: {left}.' },
+    en: { title: 'The import “{name}” is partly saved', body: 'Saved: {done}. Still to correct and save: {left}.' },
   },
   'import.failed': {
     nl: { title: 'De import “{name}” kon niet worden afgerond', body: 'Kijk in de lijst wat er mis ging.' },

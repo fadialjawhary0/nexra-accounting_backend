@@ -194,11 +194,4 @@ export class ReportsService {
     return this.presetView(updated);
   }
 
-  async removePreset(id: string, user: AuthenticatedUser) {
-    const preset = await this.presetOrThrow(id);
-    this.definitionOrThrow(preset.reportKey, user);
-    await this.prisma.exportPreset.delete({ where: { id } });
-    await this.audit.log({ action: 'deleted', entityType: PRESET_ENTITY, entityId: id, entityLabel: preset.name, before: this.presetView(preset) });
-    return { id };
-  }
 }

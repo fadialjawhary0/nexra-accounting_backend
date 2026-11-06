@@ -1,10 +1,11 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Put, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { Locale, type AppLocale } from '../../common/decorators/locale.decorator.js';
 import { RequireAnyPermission, RequirePermission } from '../../common/decorators/require-permission.decorator.js';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user.js';
 import { ExportsService } from '../../lib/exports/exports.service.js';
+import { DeletionService } from '../deletion/deletion.service.js';
 import { readFieldFilters } from '../forms/dynamic-query.js';
 import { ClientFoldersService } from './client-folders.service.js';
 import { ClientPeopleService } from './client-people.service.js';
@@ -38,6 +39,7 @@ export class ClientsController {
     private readonly folders: ClientFoldersService,
     private readonly quality: ClientQualityService,
     private readonly exports: ExportsService,
+    private readonly deletion: DeletionService,
   ) {}
 
   /**
@@ -175,9 +177,12 @@ export class ClientsController {
     return this.folders.rename(await this.clients.findOrThrow(id), folderId, dto.name);
   }
 
-  @RequirePermission('clients.edit')
+  /** Deletes the folder with what is in it (soft). */
+  @RequirePermission('documents.remove')
   @Delete(':id/folders/:folderId')
-  async removeFolder(@Param('id') id: string, @Param('folderId') folderId: string) {
-    return this.folders.remove(await this.clients.findOrThrow(id), folderId);
+  async removeFolder(@Param('id') id: string, @Param('folderId') folderId: string, @CurrentUser() user: AuthenticatedUser) {
+    const client = await this.clients.findOrThrow(id);
+    if (!(await this.folders.belongsTo(client, folderId))) throw new NotFoundException({ code: 'not_found', message: 'Folder not found' });
+    return this.deletion.delete('folder', folderId, user);
   }
 }

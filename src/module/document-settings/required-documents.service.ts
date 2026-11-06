@@ -106,13 +106,6 @@ export class RequiredDocumentsService {
     return this.view(updated, locale);
   }
 
-  /** A rule holds no history (what is missing is never stored), so it can be deleted; the audit log remembers it. */
-  async remove(id: string): Promise<void> {
-    const row = await this.rowOrThrow(id);
-    await this.prisma.requiredDocument.delete({ where: { id } });
-    await this.audit.log({ action: 'deleted', entityType: ENTITY, entityId: id, entityLabel: this.label(row), before: this.snapshot(row) });
-  }
-
   /* ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────── */
 
   private async rowOrThrow(id: string): Promise<Row> {

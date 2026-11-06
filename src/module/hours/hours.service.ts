@@ -220,10 +220,10 @@ export class HoursService {
         {
           OR: [
             { AND: [{ OR: [{ startDate: null }, { startDate: { lte: range.lte } }] }, { OR: [{ endDate: null }, { endDate: { gte: range.gte } }] }] },
-            { hourEntries: { some: { date: range } } },
+            { hourEntries: { some: { date: range, deletedAt: null } } },
           ],
         },
-        ...(query.withHours ? [{ hourEntries: { some: { date: range } } }] : []),
+        ...(query.withHours ? [{ hourEntries: { some: { date: range, deletedAt: null } } }] : []),
         ...terms.map(term => ({
           OR: [{ person: { searchText: { contains: term } } }, { client: { number: { contains: term, mode: 'insensitive' as const } } }, { client: { name: { contains: term, mode: 'insensitive' as const } } }],
         })),
@@ -297,7 +297,7 @@ export class HoursService {
     if (minutes === before) return done(before, existing.length, false);
     if (minutes === 0) {
       if (!may('delete')) return fail('forbidden');
-      await this.prisma.hourEntry.delete({ where: { id: existing[0]!.id } });
+      await this.prisma.hourEntry.update({ where: { id: existing[0]!.id }, data: { deletedAt: new Date(), deletedById: user.id } });
       return done(0, 0, true);
     }
     if (!existing.length) {
@@ -517,7 +517,7 @@ export class HoursService {
     const worker = await this.workerOrThrow(row.employeeId);
     const date = formatDay(row.date);
     const closed = await this.assertOpen(worker.id, date, user, reason);
-    await this.prisma.hourEntry.delete({ where: { id } });
+    await this.prisma.hourEntry.update({ where: { id }, data: { deletedAt: new Date(), deletedById: user.id } });
     await this.audit.log({
       action: 'deleted',
       entityType: 'hours',

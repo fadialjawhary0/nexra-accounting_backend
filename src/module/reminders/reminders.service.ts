@@ -250,13 +250,6 @@ export class RemindersService implements OnApplicationBootstrap {
     return this.serialize(updated);
   }
 
-  async remove(id: string) {
-    const rule = await this.findOrThrow(id);
-    await this.prisma.reminderRule.delete({ where: { id } });
-    await this.audit.log({ action: 'deleted', entityType: 'reminder_rule', entityId: id, entityLabel: rule.name, before: this.serialize(rule) });
-    return { id };
-  }
-
   private serialize(rule: ReminderRule) {
     const provider = this.providers.get(rule.trigger);
     return {

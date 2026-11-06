@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { DeletionModule } from '../deletion/deletion.module.js';
 import { DocumentSettingsModule } from '../document-settings/document-settings.module.js';
 import { EmployeesModule } from '../employees/employees.module.js';
 import { FilesModule } from '../files/files.module.js';
@@ -17,7 +18,7 @@ import { ClientsService } from './clients.service.js';
 
 /** Clients (Klanten): the grid, the client form, people and their roles, relations between clients, the client's folders, data quality and export. */
 @Module({
-  imports: [FormsModule, NumberingModule, ListsModule, FilesModule, PeopleModule, EmployeesModule, DocumentSettingsModule, SearchModule],
+  imports: [FormsModule, NumberingModule, ListsModule, FilesModule, PeopleModule, EmployeesModule, DocumentSettingsModule, SearchModule, DeletionModule],
   controllers: [ClientsController],
   providers: [ClientsService, ClientPeopleService, ClientRelationsService, ClientFoldersService, ClientQualityService, ClientSearchProvider],
   exports: [ClientsService, ClientPeopleService, ClientFoldersService],
