@@ -17,8 +17,9 @@ export class InspectionListsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async entries(key: string): Promise<ListEntry[]> {
-    const items = await this.prisma.listItem.findMany({ where: { list: { key } }, orderBy: [{ sortOrder: 'asc' }, { nameNl: 'asc' }], select: { code: true, nameNl: true, nameEn: true, isActive: true, meta: true } });
-    return items.map(item => ({ code: item.code, nameNl: item.nameNl, nameEn: item.nameEn, isActive: item.isActive, meta: asRecord(item.meta) }));
+    // A deleted item is still read for its name (an inspection may hold it), but can no longer be chosen.
+    const items = await this.prisma.withDeleted.listItem.findMany({ where: { list: { key } }, orderBy: [{ sortOrder: 'asc' }, { nameNl: 'asc' }], select: { code: true, nameNl: true, nameEn: true, isActive: true, deletedAt: true, meta: true } });
+    return items.map(item => ({ code: item.code, nameNl: item.nameNl, nameEn: item.nameEn, isActive: item.isActive && !item.deletedAt, meta: asRecord(item.meta) }));
   }
 
   /** `code → name` in the language asked for. */

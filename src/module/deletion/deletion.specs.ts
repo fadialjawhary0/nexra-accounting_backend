@@ -61,14 +61,14 @@ export interface Tombstone {
 
 /**
  * The values freed while deleted, so the same client number, e-mail address or name can be used again. Codes of what the system ships (document types, list items, VAT steps,
- * checklists, holidays …) are not freed on purpose: their row keeps the code, so running the seed again does not bring a deleted one back.
+ * checklists, holidays …) are not freed on purpose: their row keeps the code, so running the seed again does not bring a deleted one back. A list item always keeps its code: records
+ * that hold it keep showing its name, and adding the same choice again brings the row back (`ListsService.addItem`).
  */
 export const TOMBSTONES: Partial<Record<SoftDeleteModel, Tombstone[]>> = {
   Client: [{ field: 'number', kind: 'text' }],
   User: [{ field: 'email', kind: 'text' }],
   Role: [{ field: 'key', kind: 'text' }],
   List: [{ field: 'key', kind: 'text', when: row => row.isSystem !== true }],
-  ListItem: [{ field: 'code', kind: 'text', when: row => row.isSystem !== true }],
   DocumentType: [{ field: 'code', kind: 'text', when: row => row.isSystem !== true }],
   FolderTemplate: [{ field: 'code', kind: 'text', when: row => row.isSystem !== true }],
   ImportMapping: [{ field: 'name', kind: 'text' }],
@@ -337,7 +337,8 @@ export const DELETION_SPECS: Record<string, DeletionSpec> = {
     guard: row => (row.isSystem === true ? 'delete_system' : null),
     children: async (row, prisma) => [{ model: 'ListItem', ids: await ids(prisma, 'ListItem', { listId: text(row.id) }) }],
   },
-  list_item: { area: 'settings', model: 'ListItem', label: row => text(row.nameNl), guard: row => (row.isSystem === true ? 'delete_system' : null) },
+  // Every item of a choice list can go, built-in ones too. The fixed lists (the statuses) are what the program itself works with: it would still set them, and they cannot be added back.
+  list_item: { area: 'settings', model: 'ListItem', include: { list: { select: { allowNewItems: true } } }, label: row => text(row.nameNl), guard: row => (nested(row, 'list').allowNewItems === false ? 'delete_system' : null) },
   holiday: { area: 'settings', model: 'Holiday', label: row => [text(row.nameNl), day(row.date)].filter(Boolean).join(' · ') },
   document_type: {
     area: 'settings',

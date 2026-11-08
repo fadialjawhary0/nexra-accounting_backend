@@ -135,7 +135,7 @@ export class FormRecordsService {
   async searchText(doc: FormDoc, values: Record<string, unknown>, extra: string[] = []): Promise<string> {
     const searchable = doc.fields.filter(field => field.active && field.flags.search && !isEncryptedField(field) && !isEmptyValue(values[field.key]));
     const listKeys = [...new Set(searchable.filter(field => (field.type === 'select' || field.type === 'multiselect') && field.list).map(field => field.list as string))];
-    const items = listKeys.length ? await this.prisma.listItem.findMany({ where: { list: { key: { in: listKeys } } }, select: { code: true, nameNl: true, nameEn: true, list: { select: { key: true } } } }) : [];
+    const items = listKeys.length ? await this.prisma.withDeleted.listItem.findMany({ where: { list: { key: { in: listKeys } } }, select: { code: true, nameNl: true, nameEn: true, list: { select: { key: true } } } }) : [];
     const names = new Map(items.map(item => [`${item.list.key}:${item.code}`, [item.nameNl, item.nameEn]]));
 
     const pieces: string[] = [...extra];

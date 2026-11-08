@@ -1,7 +1,7 @@
 # Nexra B.V. — backend
 
 NestJS 12 · TypeScript (ESM, NodeNext) · Prisma 7 · PostgreSQL (17 on port 5433 locally). The API behind the Next.js app in
-`../nexra-accounting_frontend`. Plan: [`../docs/15-project-plan.md`](../docs/15-project-plan.md); rules: [`../CLAUDE.md`](../CLAUDE.md).
+`../nexra-accounting_frontend`. Plan: [`../docs/15-project-plan.md`](../docs/15-project-plan.md).
 
 ## Run it
 
@@ -404,6 +404,8 @@ New building blocks are created with the Nest CLI, always without spec files:
   (reads, `updateMany`, `deleteMany`). Write `deletedAt: null` / `ALIVE` yourself in a nested `include` of a relation list,
   in `_count`, in relation filters (`some` / `none`), in raw SQL (`"deletedAt" IS NULL`) and when a record is read through
   another table (a session's user). `this.prisma.withDeleted` reads everything (deleting, restoring, choosing a free code).
+- A list item keeps its code when deleted. `ListsService.lookups` still returns it (`deleted`, `active: false`) so records keep its name, `addItem` brings it back when the same choice is added again, and code
+  that turns a stored code into a name reads through `withDeleted`. The fixed lists (`allowNewItems: false`) refuse deleting.
 - A new table with records people can delete: add the three columns + indexes, its name in `SOFT_DELETE_MODELS`, a spec
   in `deletion.specs.ts`, the type in the frontend's `DELETION_AREAS`, and its model name in `common.deletion.models`.
 

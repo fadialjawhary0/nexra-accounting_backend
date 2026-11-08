@@ -32,8 +32,8 @@ const serializeItem = (item: ListItem, locale: AppLocale) => ({
 
 /**
  * Pick-lists and status lookups: one table pair for every fixed list in the app. Records store the item `code`; screens ask for the
- * names in the person's language. An item is switched off to keep it for the history; one the office added itself can also be deleted (soft — records
- * that still hold its code then show the code).
+ * names in the person's language. An item is switched off to keep it on offer later; an item of a choice list (`allowNewItems`) can also be deleted (soft), built-in ones
+ * too: it is no longer offered anywhere, records that hold its code keep showing its name. The fixed lists (the statuses) are what the program itself works with.
  */
 @Injectable()
 export class ListsService {
@@ -72,10 +72,13 @@ export class ListsService {
     return this.serializeList(list, locale);
   }
 
-  /** Several lists at once, active and inactive items (a record may still carry a switched-off value), in the person's language. */
+  /**
+   * Several lists at once, in the person's language: active and inactive items (a record may still carry a switched-off value) and the deleted ones (`deleted`, never offered:
+   * a record that holds one keeps showing its name — on the screen and in exports, letters and forms).
+   */
   async lookups(keys: string[], locale: AppLocale) {
-    const lists = await this.prisma.list.findMany({ where: { key: { in: keys } }, include: { items: { where: ALIVE, orderBy: [{ sortOrder: 'asc' }, { nameNl: 'asc' }] } } });
-    return Object.fromEntries(lists.map(list => [list.key, { kind: list.kind, items: list.items.map(item => serializeItem(item, locale)) }]));
+    const lists = await this.prisma.withDeleted.list.findMany({ where: { key: { in: keys }, deletedAt: null }, include: { items: { orderBy: [{ sortOrder: 'asc' }, { nameNl: 'asc' }] } } });
+    return Object.fromEntries(lists.map(list => [list.key, { kind: list.kind, items: list.items.map(item => ({ ...serializeItem(item, locale), ...(item.deletedAt && { active: false, deleted: true }) })) }]));
   }
 
   /** For other modules: the codes a record may currently be given. */
@@ -133,7 +136,15 @@ export class ListsService {
     if (!list.allowNewItems) throw new ForbiddenException({ code: 'list_fixed', message: 'Items cannot be added to this list.' });
     const baseCode = toCode(dto.nameEn) || toCode(dto.nameNl);
     if (!baseCode) throw this.invalid({ nameEn: 'validation.invalid' });
-    const existing = await this.prisma.listItem.findMany({ where: { listId: list.id }, select: { code: true, sortOrder: true } });
+    const existing = await this.prisma.withDeleted.listItem.findMany({ where: { listId: list.id }, select: { id: true, code: true, sortOrder: true, deletedAt: true, nameNl: true, nameEn: true } });
+    // The same choice again (a built-in code need not follow the name, so the names count too): the deleted row comes back with its code, and the records that hold it are right again.
+    const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+    const deleted = existing.find(item => item.deletedAt && !item.code.includes('~deleted~') && (item.code === baseCode || same(item.nameNl, dto.nameNl) || same(item.nameEn, dto.nameEn)));
+    if (deleted) {
+      const back = await this.prisma.withDeleted.listItem.update({ where: { id: deleted.id }, data: { nameNl: dto.nameNl.trim(), nameEn: dto.nameEn.trim(), isActive: true, deletedAt: null, deletedById: null, deletionId: null } });
+      await this.audit.log({ action: 'restored', entityType: 'list', entityId: key, entityLabel: `${list.nameEn}: ${back.nameEn}`, after: { code: back.code, nameNl: back.nameNl, nameEn: back.nameEn } });
+      return serializeItem(back, locale);
+    }
     const taken = new Set(existing.map(item => item.code));
     let code = baseCode;
     for (let suffix = 2; taken.has(code); suffix += 1) code = `${baseCode}_${suffix}`;

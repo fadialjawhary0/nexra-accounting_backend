@@ -202,7 +202,7 @@ export class AddressBookService {
     const where = this.where(query);
     this.exports.assertSize(await this.prisma.addressBookEntry.count({ where }));
     const rows = await this.prisma.addressBookEntry.findMany({ where, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }], include: { _count: { select: { forms: { where: ALIVE }, submissions: { where: ALIVE } } } } });
-    const categories = await this.prisma.listItem.findMany({ where: { list: { key: 'address_category' } }, select: { code: true, nameNl: true, nameEn: true } });
+    const categories = await this.prisma.withDeleted.listItem.findMany({ where: { list: { key: 'address_category' } }, select: { code: true, nameNl: true, nameEn: true } });
     const nl = locale === 'nl';
     const categoryName = new Map(categories.map(item => [item.code, nl ? item.nameNl : item.nameEn]));
     return {

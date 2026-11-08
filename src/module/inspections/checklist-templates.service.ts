@@ -147,7 +147,7 @@ export class ChecklistTemplatesService {
   private async checkedTypes(input: string[] | undefined): Promise<string[]> {
     const wanted = [...new Set((input ?? []).map(code => code.trim()).filter(Boolean))];
     if (!wanted.length) return [];
-    const known = await this.prisma.listItem.findMany({ where: { list: { key: 'inspection_type' }, code: { in: wanted } }, select: { code: true } });
+    const known = await this.prisma.withDeleted.listItem.findMany({ where: { list: { key: 'inspection_type' }, code: { in: wanted } }, select: { code: true } });
     if (known.length !== wanted.length) throw validationFailed({ inspectionTypes: 'validation.invalid' });
     return wanted;
   }

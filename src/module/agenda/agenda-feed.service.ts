@@ -216,7 +216,7 @@ export class AgendaFeedService {
   }
 
   private async inspectionNames(locale: AppLocale) {
-    const items = await this.prisma.listItem.findMany({ where: { list: { key: { in: ['inspection_type', 'inspection_body'] } } }, select: { code: true, nameNl: true, nameEn: true, list: { select: { key: true } } } });
+    const items = await this.prisma.withDeleted.listItem.findMany({ where: { list: { key: { in: ['inspection_type', 'inspection_body'] } } }, select: { code: true, nameNl: true, nameEn: true, list: { select: { key: true } } } });
     const pick = (key: string) => new Map(items.filter(item => item.list.key === key).map(item => [item.code, locale === 'nl' ? item.nameNl : item.nameEn]));
     return { type: pick('inspection_type'), body: pick('inspection_body') };
   }
